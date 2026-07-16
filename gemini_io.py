@@ -25,15 +25,34 @@ or address) as `link_or_reference`, never invent a URL.
 Note on status: "Active Under Contract" and "Coming Soon" are not standard
 labels — map "Active Under Contract" to "pending" and "Coming Soon" to "active".
 
+Note on feedback: capture each individual piece of buyer/showing feedback
+verbatim, exactly as written — do not paraphrase, summarize, or group similar
+comments into a single theme. Each one is its own entry with the date it was
+given if the document states one (e.g. the showing date this feedback is
+attached to); use null if no date is stated for that specific piece of feedback.
+
+Note on showings — read this carefully, a past extraction got this wrong:
+`showings.total` and `showings.last_30_days` must be the number of times the
+SUBJECT property itself has been shown, stated directly in a per-listing
+report (e.g. a "Listing Activity Report"). A Target Market Analysis or
+Pricing Benchmark report's price-band showing counts describe activity across
+MANY competing listings in that price range/segment — that is a completely
+different number from the subject's own showings. Never sum, average, or
+otherwise derive `showings.total`/`showings.last_30_days` from price-band
+data. If a document only gives market-wide/price-band showing counts and
+never states the subject's own showing count, leave `showings.total` and
+`showings.last_30_days` as null — do not substitute the band total.
+
 {
   "address": string or null,
   "list_price": number or null,
   "original_list_price": number or null,
+  "list_date": string or null,
   "days_on_market": number or null,
   "square_feet": number or null,
   "price_history": [ {"date": string, "price": number} ],
   "showings": {"total": number or null, "last_30_days": number or null},
-  "feedback_themes": [string],
+  "feedback": [ {"date": string or null, "quote": string} ],
   "online_traffic": {"views": number or null, "saves": number or null},
   "comparable_listings": [
     {
@@ -75,6 +94,7 @@ Extract into this JSON shape. Use null for anything not present. Do not guess.
 {
   "address": string or null,
   "list_price": number or null,
+  "list_date": string or null,
   "days_on_market": number or null,
   "bedrooms": number or null,
   "bathrooms": number or null,

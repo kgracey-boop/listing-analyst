@@ -5,7 +5,9 @@ flag disagreement; per-platform metrics (views/saves) stay broken out by
 source rather than being summed, since they're not the same underlying count.
 """
 
-SINGLE_FIELDS = ["address", "list_price", "original_list_price", "days_on_market", "square_feet"]
+from market_stats import try_parse_date
+
+SINGLE_FIELDS = ["address", "list_price", "original_list_price", "list_date", "days_on_market", "square_feet"]
 SHOWINGS_FIELDS = ["total", "last_30_days"]
 
 BACKFILL_FIELDS = ["property_type", "subdivision", "city", "postal_code"]
@@ -55,11 +57,12 @@ def empty_merged() -> dict:
         "address": None,
         "list_price": None,
         "original_list_price": None,
+        "list_date": None,
         "days_on_market": None,
         "square_feet": None,
         "showings": {"total": None, "last_30_days": None},
         "traffic_by_source": [],
-        "feedback_themes": [],
+        "feedback": [],
         "comparable_listings": [],
         "price_bands": [],
         "price_history": [],
@@ -101,10 +104,16 @@ def merge_extractions(sources: list) -> dict:
 
     seen_feedback = set()
     for s in sources:
-        for theme in s["data"].get("feedback_themes") or []:
-            if theme not in seen_feedback:
-                seen_feedback.add(theme)
-                merged["feedback_themes"].append(theme)
+        for entry in s["data"].get("feedback") or []:
+            quote = (entry.get("quote") or "").strip()
+            if not quote:
+                continue
+            key = (entry.get("date"), quote)
+            if key not in seen_feedback:
+                seen_feedback.add(key)
+                merged["feedback"].append({"date": entry.get("date"), "quote": quote, "source": s["source"]})
+
+    merged["feedback"].sort(key=lambda f: try_parse_date(f.get("date")) or try_parse_date("1900-01-01"), reverse=True)
 
     comps_by_key = {}
     comp_order = []

@@ -4,6 +4,7 @@ import tempfile
 import threading
 from datetime import date
 
+import pandas as pd
 import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx
 
@@ -18,6 +19,7 @@ except Exception:
 
 import db_storage as storage
 from branding import BRAND, inject_css, render_footer, render_header
+from charts import price_band_chart, price_position_chart
 from comps_store import active_for_calculation, all_comps_list, update_known_comps
 from csv_parser import parse_mls_csv
 from gemini_io import ACTIVITY_PROMPT, PROFILE_PROMPT, extract_json, get_client
@@ -70,6 +72,56 @@ RALEIGH_FACTS = [
     "Even squirrels double-check their math before winter. So are we, right now.",
     "An oak's root system often spreads wider than its branches — kind of like a good comp radius.",
     "Every oak was once an acorn that refused to quit. Every listing deserves the same energy.",
+    "Squirrels can find buried acorns under a foot of snow by smell alone. We're just as good at sniffing out your comps.",
+    "A squirrel's front teeth never stop growing — kind of like your list price, if the market's on your side.",
+    "Squirrels plant more trees than any landscaper ever has, purely by forgetting where they buried lunch.",
+    "Gray squirrels can rotate their ankles 180 degrees to climb down headfirst. We prefer to keep this report right-side up.",
+    "Squirrels 'deceptive cache' — pretending to bury a nut to fool onlookers. Our numbers, unlike theirs, are not a decoy.",
+    "A squirrel's memory for its stashes is only so-so. Good thing we wrote everything down.",
+    "Squirrels have been clocked jumping 10 feet in a single leap. Your report should be ready before you'd even land.",
+    "Baby squirrels are called kits — and about this size, our loading bar. Almost there.",
+    "Squirrels test a branch's strength with their front paws before committing. We did the same with your data.",
+    "A squirrel's tail acts as a parachute, a blanket, and a signal flag. Our loading screen only has one job, and it's this one.",
+    "Squirrels spend up to 80% of their waking hours foraging. We spent about that much time on your absorption rate.",
+    "Some squirrels cache tens of thousands of nuts a year across thousands of spots. Comparatively, your comp list is very manageable.",
+    "Squirrels will fake-bury a nut in front of a rival, then stash the real one elsewhere. No sleight of hand here — just your real numbers.",
+    "A squirrel can smell a buried acorn through a foot of dirt, but somehow still loses the car keys. We haven't lost anything, promise.",
+    "Squirrels' back legs rotate almost backward for a headfirst descent — showing off, mostly. Our report will land more gracefully.",
+    "Squirrels don't hibernate — they just nap a lot and hoard snacks. Honestly, relatable, and also basically what your data's been doing until now.",
+    "A single mature oak can drop 10,000 acorns in a good year. We were slightly more selective with your comps.",
+    "Oaks can live over 400 years — this loading screen will not test that patience.",
+    "It takes an oak about 20 years before it produces its first real acorn crop. Yours is coming up momentarily.",
+    "Oak wood was once the gold standard for shipbuilding — sturdy, reliable, built to last. We had the same goal for this report.",
+    "An oak's canopy can shade a quarter acre on its own. Your market data, similarly, covers a lot of ground.",
+    "Oaks host more caterpillar species than almost any other tree — busy little ecosystem. Your comp list is a bit tidier.",
+    "A 'mast year' is when oaks produce way more acorns than usual, all at once. Consider this report your mast year for market data.",
+    "The word 'acorn' descends from an Old English word basically meaning 'berry of the open field.' We've upgraded the packaging since then.",
+    "Oaks are wind-pollinated, not bee-pollinated — no middleman required. We cut out a few of those too.",
+    "Some oak roots run deeper than the tree is tall, quietly doing the real work underground. Kind of like everything behind this loading screen.",
+    "Raleigh has planted tens of thousands of trees through its urban forestry efforts. We only had to plant one report today: yours.",
+    "An oak tree can support over 500 species of moths and butterflies. Your listing just needs to support one really good offer.",
+    "Acorns are technically a fruit, not a nut. We're not going to argue technicalities about your listing, though — a good comp's a good comp.",
+    "The oldest oaks in North Carolina predate the state itself. This app, mercifully, does not run on that timeline.",
+    "Cracking this nut open for you now.",
+    "Squirreling away your data point by point.",
+    "Sorting the good acorns from the empty shells — your comps edition.",
+    "No nuts were harmed in the making of this report.",
+    "Stashing your stats where we can actually find them again.",
+    "This is the part where we act very busy and very squirrelly.",
+    "Counting acorns so you don't have to.",
+    "Digging through the underbrush for your market data.",
+    "We promise this cache won't be forgotten by spring.",
+    "Assembling your report, nut by nut.",
+    "Foraging through the fine print now.",
+    "Your data is out of its shell and almost ready.",
+    "Filing this one under 'definitely not lost in the yard.'",
+    "Bushy-tailed and ready to report.",
+    "Climbing out on a limb to get you the good numbers.",
+    "Hoarding insights, one comp at a time.",
+    "Shaking the tree to see what data falls out.",
+    "Building you a report sturdy enough to survive a Raleigh windstorm.",
+    "Almost there — no acorns were left behind.",
+    "Your report is ripening nicely on the branch.",
 ]
 
 
@@ -325,10 +377,10 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value
 
 
-def goto(view, slug=None):
+def goto(view, slug=None, stage="csv"):
     st.session_state["view"] = view
     st.session_state["slug"] = slug
-    st.session_state["stage"] = "csv"
+    st.session_state["stage"] = stage
     st.session_state["sources"] = []
     st.session_state["processed_files"] = set()
     st.session_state["csv_result"] = None
@@ -384,11 +436,17 @@ def render_menu():
         else:
             with st.container(key="properties-list"):
                 for slug, profile in properties:
-                    row, delete_col = st.columns([5, 1])
+                    has_saved_report = bool(storage.load_history(slug))
+                    row, jump_col, delete_col = st.columns([4, 2, 1])
                     with row:
                         if st.button(profile.get("address") or slug, key=f"select-{slug}", use_container_width=True):
                             goto("property", slug)
                             st.rerun()
+                    with jump_col:
+                        if has_saved_report:
+                            if st.button("Jump to report", key=f"jump-{slug}", use_container_width=True):
+                                goto("property", slug, stage="review")
+                                st.rerun()
                     with delete_col:
                         with st.popover("🗑️"):
                             st.write(f"Delete **{profile.get('address') or slug}**? This removes all saved reports too.")
@@ -473,7 +531,7 @@ def render_property():
 
     if stage == "csv":
         with st.expander("Property details (from MLS cut sheet)"):
-            for field in ["days_on_market", "bedrooms", "bathrooms", "square_feet", "lot_size", "year_built", "mls_number"]:
+            for field in ["list_date", "days_on_market", "bedrooms", "bathrooms", "square_feet", "lot_size", "year_built", "mls_number"]:
                 if profile.get(field):
                     st.write(f"**{field.replace('_', ' ').title()}:** {profile[field]}")
             if profile.get("remarks"):
@@ -634,6 +692,7 @@ def render_review_stage(slug, profile, history):
         merged["original_list_price"] = st.number_input(
             "Original list price", value=float(merged.get("original_list_price") or 0), step=1000.0
         )
+        merged["list_date"] = st.text_input("List date", value=merged.get("list_date") or "")
         merged["days_on_market"] = st.number_input(
             "Days on market", value=int(merged.get("days_on_market") or 0), step=1
         )
@@ -642,6 +701,11 @@ def render_review_stage(slug, profile, history):
         )
 
     with st.expander("Price history & reductions"):
+        if merged.get("list_date") or merged.get("original_list_price"):
+            date_part = f"Listed {merged['list_date']}" if merged.get("list_date") else "Listed"
+            price_part = f" at {money(merged['original_list_price'])}" if merged.get("original_list_price") else ""
+            st.caption(f"{date_part}{price_part}.")
+
         reductions = price_reductions(merged["price_history"])
         if reductions["chronological"]:
             if reductions["count"]:
@@ -656,15 +720,29 @@ def render_review_stage(slug, profile, history):
         else:
             st.caption("No price history found in the uploaded reports.")
 
-    with st.expander("Showings & feedback"):
+    with st.expander("Showings & Feedback on Subject"):
         merged["showings"]["total"] = st.number_input(
             "Showings (total)", value=int(merged["showings"].get("total") or 0), step=1
         )
         merged["showings"]["last_30_days"] = st.number_input(
             "Showings (last 30 days)", value=int(merged["showings"].get("last_30_days") or 0), step=1
         )
-        feedback_text = st.text_area("Feedback themes (one per line)", "\n".join(merged["feedback_themes"]))
-        merged["feedback_themes"] = [line.strip() for line in feedback_text.splitlines() if line.strip()]
+        st.write("Feedback — verbatim quotes, not summarized themes:")
+        feedback_df = pd.DataFrame(merged["feedback"], columns=["date", "quote", "source"])
+        edited_feedback = st.data_editor(
+            feedback_df,
+            column_config={
+                "date": st.column_config.TextColumn("Date"),
+                "quote": st.column_config.TextColumn("Quote", width="large"),
+                "source": st.column_config.TextColumn("Source", disabled=True),
+            },
+            column_order=["date", "quote", "source"],
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="feedback_editor",
+        )
+        merged["feedback"] = edited_feedback.where(edited_feedback.notna(), None).to_dict("records")
 
     with st.expander("Online traffic"):
         if merged["traffic_by_source"]:
@@ -752,8 +830,21 @@ def render_review_stage(slug, profile, history):
 
                 render_data_scope(calc_comps, stats)
 
+                st.write("**Sample chart** — price vs. days on market for active/pending/closed comps *(prototype)*:")
+                position_chart = price_position_chart(calc_comps, merged.get("list_price"), merged.get("days_on_market"))
+                if position_chart is not None:
+                    st.altair_chart(position_chart, use_container_width=True)
+                else:
+                    st.caption("Not enough comps with both a price and days-on-market to plot yet.")
+
             if merged["price_bands"]:
                 band = match_price_band(merged.get("list_price"), merged["price_bands"])
+
+                st.write("**Sample chart** — showings by price band *(prototype)*:")
+                band_chart = price_band_chart(merged["price_bands"], band)
+                if band_chart is not None:
+                    st.altair_chart(band_chart, use_container_width=True)
+
                 st.write("Showings by price band:")
                 for b in merged["price_bands"]:
                     marker = " **← your listing**" if band and b.get("band") == band else ""
@@ -784,9 +875,10 @@ def render_review_stage(slug, profile, history):
             storage.save_known_comps(slug, st.session_state["known_comps"])
             st.success("Saved. Next report for this property will compare against this one.")
     with col2:
+        pdf_calc_comps = active_for_calculation(st.session_state["known_comps"]) if st.session_state["known_comps"] else None
         st.download_button(
             "Download PDF report",
-            data=build_pdf(profile, merged, ""),
+            data=build_pdf(profile, merged, "", pdf_calc_comps),
             file_name=f"{slug}-report-{date.today().isoformat()}.pdf",
             mime="application/pdf",
         )
