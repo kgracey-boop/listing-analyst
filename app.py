@@ -30,6 +30,25 @@ from pdf_export import build_pdf
 st.set_page_config(page_title="Listing Activity Report App", page_icon="🏠", layout="wide")
 inject_css()
 
+
+def require_passcode():
+    """Simple shared-passcode gate. No-op if APP_PASSCODE isn't set (e.g. local dev)."""
+    passcode = os.environ.get("APP_PASSCODE")
+    if not passcode or st.session_state.get("authenticated"):
+        return
+    render_header("Listing Activity Report App")
+    entered = st.text_input("Enter passcode", type="password")
+    if st.button("Enter"):
+        if entered == passcode:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect passcode.")
+    st.stop()
+
+
+require_passcode()
+
 DEFAULTS = {
     "view": "menu",
     "slug": None,
