@@ -37,7 +37,7 @@ from market_stats import (
 from merge import address_key, empty_merged, merge_extractions, total_views
 from pdf_export import build_pdf
 
-st.set_page_config(page_title="Listing Activity Report App", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="RootedReports", page_icon="🏠", layout="wide")
 inject_css()
 
 
@@ -46,7 +46,7 @@ def require_passcode():
     passcode = os.environ.get("APP_PASSCODE")
     if not passcode or st.session_state.get("authenticated"):
         return
-    render_header("Listing Activity Report App")
+    render_header("RootedReports")
     entered = st.text_input("Enter passcode", type="password")
     if st.button("Enter"):
         if entered == passcode:
@@ -423,7 +423,7 @@ class scrolling_loader:
 
 # ---------------------------------------------------------------- MENU VIEW
 def render_menu():
-    render_header("Listing Activity Report App")
+    render_header("RootedReports")
     st.subheader("Get started")
 
     properties = storage.list_properties()

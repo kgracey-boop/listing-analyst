@@ -1,4 +1,4 @@
-# Listing Activity Report App — Plan
+# RootedReports — Plan
 
 ## In design — running/deduplicated comp set per property (2026-07-16)
 Currently, comps only exist inside each saved report's own snapshot — no running

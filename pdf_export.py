@@ -177,7 +177,7 @@ def build_pdf(profile: dict, merged: dict, commentary: str, calc_comps: list = N
     pdf.set_xy(10, 7)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 9, profile.get("address") or "Listing Activity Report", ln=1)
+    pdf.cell(0, 9, profile.get("address") or "RootedReports", ln=1)
     pdf.set_x(10)
     pdf.set_font("Helvetica", "", 11)
     pdf.cell(0, 6, f"{BRAND['brokerage']} · prepared by {BRAND['agent_name']}", ln=1)

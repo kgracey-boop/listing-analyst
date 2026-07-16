@@ -9,10 +9,10 @@ report feedback:
 
 Color choices follow the dataviz skill's validated palette: the price-band
 chart is "emphasis" form (one highlighted series + gray), using the brand's
-own blue/navy since only two colors are needed. The status chart needs three
-distinct categorical hues, which the brand palette doesn't supply — those
-three (blue/aqua/yellow) are the skill's own validated categorical slots 1-3,
-kept in their validated fixed order rather than reordered.
+own gold accent since only two colors are needed. The status chart needs
+three distinct categorical hues, which the brand palette doesn't supply —
+those three (blue/aqua/yellow) are the skill's own validated categorical
+slots 1-3, kept in their validated fixed order rather than reordered.
 """
 import altair as alt
 import pandas as pd
@@ -20,6 +20,14 @@ import pandas as pd
 from branding import BRAND
 
 NEUTRAL_GRAY = "#C3C2B7"
+
+# The brand's UI gold (BRAND["gold"]) is tuned for text/buttons on a navy
+# background, where it's high-contrast. As a filled bar on a white chart
+# surface it validates far too washed-out (contrast 1.8, worse than a plain
+# gray) — this deepened amber is the same brand family, calibrated instead
+# for legibility as a chart mark (validated via the dataviz skill's script:
+# contrast 2.99 vs the ~1.8 the literal brand gold gets).
+CHART_GOLD = "#C98500"
 
 STATUS_ORDER = ["Active", "Pending", "Closed"]
 STATUS_COLORS = {
@@ -30,8 +38,9 @@ STATUS_COLORS = {
 
 
 def price_band_chart(price_bands: list, subject_band: str):
-    """Emphasis bar chart: the subject's price band in brand blue, every
-    other band in neutral gray. Returns None if there's nothing to plot."""
+    """Emphasis bar chart: the subject's price band in the brand's gold
+    accent, every other band in neutral gray. Returns None if there's
+    nothing to plot."""
     if not price_bands:
         return None
 
@@ -46,7 +55,7 @@ def price_band_chart(price_bands: list, subject_band: str):
             y=alt.Y("showing_count:Q", title="Showings"),
             color=alt.Color(
                 "highlight:N",
-                scale=alt.Scale(domain=["Your listing", "Other bands"], range=[BRAND["blue"], NEUTRAL_GRAY]),
+                scale=alt.Scale(domain=["Your listing", "Other bands"], range=[CHART_GOLD, NEUTRAL_GRAY]),
                 legend=alt.Legend(title=None),
             ),
             tooltip=[alt.Tooltip("band:N", title="Price band"), alt.Tooltip("showing_count:Q", title="Showings")],

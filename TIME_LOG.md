@@ -1,4 +1,4 @@
-# Time Log — Listing Activity Report App
+# Time Log — RootedReports
 
 Rough estimates, logged per session at Kevin's request. Not precise timesheets —
 just enough to track roughly how much time has gone into this project, with a
