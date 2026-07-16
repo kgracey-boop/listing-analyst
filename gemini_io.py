@@ -12,24 +12,49 @@ load_dotenv()
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 
-ACTIVITY_PROMPT = """You are reading a real estate listing activity report
-(PDF or screenshot). It may contain tables and charts covering showings,
-feedback, price history, comparable sales, and traffic (online views/saves).
+ACTIVITY_PROMPT = """You are reading one real estate report about a listing or
+its market — could be a listing activity report, an MLS comp sheet (active/
+pending/closed listings), a pricing benchmark report, or a target-market/
+price-band analysis. Not every field below will apply to every document — use
+null or an empty list for anything not present. Do not guess or invent numbers.
 
-Extract everything you can find into this JSON shape. Use null for anything
-not present in the document. Do not guess or invent numbers — only report
-what is actually shown.
+Note on links: if you see a clickable link in the document, you cannot recover
+its actual URL from a rendered page — only capture visible text (like an MLS#
+or address) as `link_or_reference`, never invent a URL.
+
+Note on status: "Active Under Contract" and "Coming Soon" are not standard
+labels — map "Active Under Contract" to "pending" and "Coming Soon" to "active".
 
 {
   "address": string or null,
   "list_price": number or null,
   "original_list_price": number or null,
   "days_on_market": number or null,
+  "square_feet": number or null,
   "price_history": [ {"date": string, "price": number} ],
   "showings": {"total": number or null, "last_30_days": number or null},
   "feedback_themes": [string],
   "online_traffic": {"views": number or null, "saves": number or null},
-  "comparable_sales": [ {"address": string, "sale_price": number, "sale_date": string, "days_on_market": number or null} ],
+  "comparable_listings": [
+    {
+      "address": string or null,
+      "status": "active" or "pending" or "closed" or "expired" or "withdrawn" or null,
+      "list_price": number or null,
+      "original_list_price": number or null,
+      "sold_price": number or null,
+      "square_feet": number or null,
+      "days_on_market": number or null,
+      "close_date": string or null,
+      "link_or_reference": string or null,
+      "property_type": string or null,
+      "subdivision": string or null,
+      "city": string or null,
+      "postal_code": string or null
+    }
+  ],
+  "price_band_analysis": {
+    "bands": [ {"band": string, "showing_count": number} ]
+  },
   "notes_on_missing_or_unclear_data": [string]
 }
 
@@ -54,6 +79,7 @@ Extract into this JSON shape. Use null for anything not present. Do not guess.
   "bedrooms": number or null,
   "bathrooms": number or null,
   "square_feet": number or null,
+  "property_type": string or null,
   "lot_size": string or null,
   "year_built": number or null,
   "mls_number": string or null,

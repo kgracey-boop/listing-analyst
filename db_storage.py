@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS history (
     snapshot JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE properties ADD COLUMN IF NOT EXISTS known_comps JSONB NOT NULL DEFAULT '{}'::jsonb;
 """
 
 
@@ -87,3 +88,14 @@ def save_snapshot(slug: str, snapshot: dict):
 def delete_property(slug: str):
     with _connect() as conn:
         conn.execute("DELETE FROM properties WHERE slug = %s", (slug,))
+
+
+def load_known_comps(slug: str) -> dict:
+    with _connect() as conn:
+        row = conn.execute("SELECT known_comps FROM properties WHERE slug = %s", (slug,)).fetchone()
+    return row[0] if row and row[0] else {}
+
+
+def save_known_comps(slug: str, known_comps: dict):
+    with _connect() as conn:
+        conn.execute("UPDATE properties SET known_comps = %s WHERE slug = %s", (Jsonb(known_comps), slug))

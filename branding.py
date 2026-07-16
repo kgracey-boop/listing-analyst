@@ -11,6 +11,9 @@ BRAND = {
     "blue": "#1F69FF",
     "slate": "#46587A",
     "mist": "#F3F6FB",
+    # {mls_number} gets substituted in — swap this per agent's own site once
+    # this app supports more than one agent.
+    "search_url_template": "https://aprilaumanrealestate.com/search/#location_search_field={mls_number}",
 }
 
 
