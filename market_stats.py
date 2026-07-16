@@ -243,6 +243,112 @@ def price_reductions(price_history: list) -> dict:
     }
 
 
+MIN_KNOWN_FOR_RATE = 5
+MIN_MONTHS_WITH_DATA = 4
+MIN_PER_MONTH_BUCKET = 3
+TREND_THRESHOLD_POINTS = 10
+
+
+def _had_reduction(comp: dict):
+    """True/False if we know both prices for this comp, else None (unknown,
+    not "no reduction") — a comp missing original_list_price shouldn't
+    silently count as "never reduced"."""
+    list_price = comp.get("list_price")
+    original = comp.get("original_list_price")
+    if list_price is None or original is None:
+        return None
+    return list_price < original
+
+
+def _reduction_rate(comps: list) -> dict:
+    known = [r for r in (_had_reduction(c) for c in comps) if r is not None]
+    reduced = sum(1 for r in known if r)
+    return {
+        "total": len(comps),
+        "known": len(known),
+        "reduced": reduced,
+        "pct": round(100 * reduced / len(known)) if len(known) >= MIN_KNOWN_FOR_RATE else None,
+    }
+
+
+def comp_price_reduction_stats(comparable_listings: list, as_of=None) -> dict:
+    """
+    How many pending/closed comps show at least one price reduction (current
+    list price below original list price) before reaching that status, plus
+    whether closed comps' reduction rate is trending over the trailing 12
+    months. Trend uses close_date — the only reliable per-comp date field;
+    comps don't carry a list date the way the subject property does, so a
+    trend for pending/active comps isn't computable from what we're given.
+    """
+    as_of = as_of or datetime.today()
+    cutoff = as_of - timedelta(days=365)
+
+    pending = [c for c in comparable_listings if c.get("status") == "pending"]
+    closed = [c for c in comparable_listings if c.get("status") == "closed"]
+
+    result = {
+        "pending": _reduction_rate(pending),
+        "closed": _reduction_rate(closed),
+        "trend": {
+            "enough_data": False,
+            "months_with_data": 0,
+            "earlier_pct": None,
+            "recent_pct": None,
+            "direction": None,
+        },
+    }
+
+    # Bucket closed comps with a known close_date + known reduction status
+    # by month, trailing 12 months only.
+    monthly = {}
+    for c in closed:
+        reduced = _had_reduction(c)
+        close_date = try_parse_date(c.get("close_date"))
+        if reduced is None or close_date is None or close_date < cutoff:
+            continue
+        key = (close_date.year, close_date.month)
+        bucket = monthly.setdefault(key, {"known": 0, "reduced": 0})
+        bucket["known"] += 1
+        bucket["reduced"] += 1 if reduced else 0
+
+    usable_months = {k: v for k, v in monthly.items() if v["known"] >= MIN_PER_MONTH_BUCKET}
+    result["trend"]["months_with_data"] = len(usable_months)
+
+    if len(usable_months) < MIN_MONTHS_WITH_DATA:
+        return result
+
+    ordered_keys = sorted(usable_months.keys())
+    midpoint = len(ordered_keys) // 2
+    earlier_keys, recent_keys = ordered_keys[:midpoint], ordered_keys[midpoint:]
+    if not earlier_keys or not recent_keys:
+        return result
+
+    def pct_for(keys):
+        known = sum(usable_months[k]["known"] for k in keys)
+        reduced = sum(usable_months[k]["reduced"] for k in keys)
+        return round(100 * reduced / known) if known else None
+
+    earlier_pct, recent_pct = pct_for(earlier_keys), pct_for(recent_keys)
+    if earlier_pct is None or recent_pct is None:
+        return result
+
+    diff = recent_pct - earlier_pct
+    if diff >= TREND_THRESHOLD_POINTS:
+        direction = "rising"
+    elif diff <= -TREND_THRESHOLD_POINTS:
+        direction = "falling"
+    else:
+        direction = "flat"
+
+    result["trend"].update({
+        "enough_data": True,
+        "earlier_pct": earlier_pct,
+        "recent_pct": recent_pct,
+        "direction": direction,
+    })
+    return result
+
+
 def match_price_band(list_price, bands: list):
     """
     Given a list price and a list of {"band": "$310,000 - $319,999", ...},

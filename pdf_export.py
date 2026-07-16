@@ -14,9 +14,11 @@ from fpdf.fonts import FontFace
 from branding import BRAND
 from charts import price_band_chart, price_position_chart
 from market_stats import (
+    MIN_MONTHS_WITH_DATA,
     bucket_property_type,
     compute_absorption,
     absorption_by_property_type,
+    comp_price_reduction_stats,
     data_scope_summary,
     dom_benchmark,
     match_price_band,
@@ -205,7 +207,7 @@ def build_pdf(profile: dict, merged: dict, commentary: str, calc_comps: list = N
         pdf.caption_line("No basic facts captured yet for this property.")
 
     # ------------------------------------------------- Price history section
-    if merged.get("list_date") or merged.get("original_list_price") or merged.get("price_history"):
+    if merged.get("list_date") or merged.get("original_list_price") or merged.get("price_history") or calc_comps:
         pdf.section_title("Price History")
         if merged.get("list_date") or merged.get("original_list_price"):
             date_part = f"Listed {merged['list_date']}" if merged.get("list_date") else "Listed"
@@ -221,6 +223,37 @@ def build_pdf(profile: dict, merged: dict, commentary: str, calc_comps: list = N
                 )
             else:
                 pdf.caption_line("No reductions - price has only gone up or stayed flat in the data we have.")
+
+        if calc_comps:
+            comp_stats = comp_price_reduction_stats(calc_comps)
+            pending_stats, closed_stats, trend = comp_stats["pending"], comp_stats["closed"], comp_stats["trend"]
+
+            if pending_stats["pct"] is not None:
+                pdf.caption_line(
+                    f"Pending comps: {pending_stats['reduced']} of {pending_stats['known']} had a price drop "
+                    f"before going pending (~{pending_stats['pct']}%)."
+                )
+            elif pending_stats["known"]:
+                pdf.caption_line(f"Pending comps: only {pending_stats['known']} with known pricing - too few to trust a percentage.")
+
+            if closed_stats["pct"] is not None:
+                pdf.caption_line(
+                    f"Closed comps: {closed_stats['reduced']} of {closed_stats['known']} had a price drop "
+                    f"before selling (~{closed_stats['pct']}%)."
+                )
+            elif closed_stats["known"]:
+                pdf.caption_line(f"Closed comps: only {closed_stats['known']} with known pricing - too few to trust a percentage.")
+
+            if trend["enough_data"]:
+                pdf.caption_line(
+                    f"Price-drop rate among closed comps looks {trend['direction']} over the last year "
+                    f"(~{trend['earlier_pct']}% earlier vs ~{trend['recent_pct']}% more recently)."
+                )
+            else:
+                pdf.caption_line(
+                    f"Not enough data yet to tell whether price drops are trending over the last year "
+                    f"(usable data for {trend['months_with_data']} of the last 12 months, need at least {MIN_MONTHS_WITH_DATA})."
+                )
 
     # ------------------------------------------------- Market comparison
     if calc_comps:

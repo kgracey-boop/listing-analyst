@@ -24,8 +24,10 @@ from comps_store import active_for_calculation, all_comps_list, update_known_com
 from csv_parser import parse_mls_csv
 from gemini_io import ACTIVITY_PROMPT, PROFILE_PROMPT, extract_json, get_client
 from market_stats import (
+    MIN_MONTHS_WITH_DATA,
     absorption_by_property_type,
     bucket_property_type,
+    comp_price_reduction_stats,
     compute_absorption,
     data_scope_summary,
     dom_benchmark,
@@ -719,6 +721,52 @@ def render_review_stage(slug, profile, history):
             st.dataframe(reductions["chronological"], use_container_width=True)
         else:
             st.caption("No price history found in the uploaded reports.")
+
+        calc_comps_for_reductions = active_for_calculation(st.session_state["known_comps"]) if st.session_state["known_comps"] else []
+        if calc_comps_for_reductions:
+            comp_reduction_stats = comp_price_reduction_stats(calc_comps_for_reductions)
+            st.write("Price drops among comps:")
+
+            pending_stats = comp_reduction_stats["pending"]
+            if pending_stats["pct"] is not None:
+                st.caption(
+                    f"- Pending: {pending_stats['reduced']} of {pending_stats['known']} had a price drop "
+                    f"before going pending (~{pending_stats['pct']}%)."
+                )
+            elif pending_stats["known"]:
+                st.caption(
+                    f"- Pending: only {pending_stats['known']} pending comp{'s' if pending_stats['known'] != 1 else ''} "
+                    "with known pricing — too few to trust a percentage."
+                )
+            else:
+                st.caption("- Pending: no pending comps with known original/current list price yet.")
+
+            closed_stats = comp_reduction_stats["closed"]
+            if closed_stats["pct"] is not None:
+                st.caption(
+                    f"- Closed: {closed_stats['reduced']} of {closed_stats['known']} had a price drop "
+                    f"before selling (~{closed_stats['pct']}%)."
+                )
+            elif closed_stats["known"]:
+                st.caption(
+                    f"- Closed: only {closed_stats['known']} closed comp{'s' if closed_stats['known'] != 1 else ''} "
+                    "with known pricing — too few to trust a percentage."
+                )
+            else:
+                st.caption("- Closed: no closed comps with known original/current list price yet.")
+
+            trend = comp_reduction_stats["trend"]
+            if trend["enough_data"]:
+                st.caption(
+                    f"- Price-drop rate among closed comps looks **{trend['direction']}** over the last year "
+                    f"(~{trend['earlier_pct']}% earlier vs ~{trend['recent_pct']}% more recently)."
+                )
+            else:
+                st.caption(
+                    f"- Not enough data yet to tell whether price drops are trending over the last year "
+                    f"(usable data for {trend['months_with_data']} of the last 12 months — need at least "
+                    f"{MIN_MONTHS_WITH_DATA})."
+                )
 
     with st.expander("Showings & Feedback on Subject"):
         merged["showings"]["total"] = st.number_input(
