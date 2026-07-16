@@ -4,6 +4,15 @@ from datetime import date
 
 import streamlit as st
 
+# Bridge Streamlit Cloud's secrets manager into os.environ, since the rest of
+# this app reads config via os.environ (works locally via .env too). No-op
+# if there's no secrets.toml (e.g. running locally).
+try:
+    for _key, _value in st.secrets.items():
+        os.environ.setdefault(_key, str(_value))
+except Exception:
+    pass
+
 import db_storage as storage
 from branding import inject_css, render_footer, render_header
 from gemini_io import (
