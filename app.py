@@ -347,11 +347,11 @@ def render_comps_tables(comparable_listings: list):
         if key == "active":
             st.dataframe(
                 with_listing_links(rows),
-                use_container_width=True,
+                width="stretch",
                 column_config={"listing_url": st.column_config.LinkColumn("Listing", display_text="View")},
             )
         else:
-            st.dataframe(rows, use_container_width=True)
+            st.dataframe(rows, width="stretch")
 
 
 COMP_DISPLAY_COLUMNS = [
@@ -386,7 +386,7 @@ def render_viewer_overlap_table(comps: list, since_field: str, label: str):
     st.write(f"**{label}** ({len(comps)}):")
     st.dataframe(
         [_project_viewer_overlap_comp(c, since_field) for c in comps],
-        use_container_width=True,
+        width="stretch",
         column_config={
             since_field: st.column_config.TextColumn("First flagged"),
             "listing_url": st.column_config.LinkColumn("Listing", display_text="View"),
@@ -422,7 +422,7 @@ def render_comps_editor(known_comps: dict) -> dict:
 
         edited = st.data_editor(
             display_rows,
-            use_container_width=True,
+            width="stretch",
             column_config=column_config,
             disabled=disabled_cols,
             key=f"comps_editor_{key}",
@@ -495,10 +495,22 @@ DEFAULTS = {
     "preparer_name": "April Auman",
     "preparer_brokerage": "Coldwell Banker Advantage",
     "preparer_contact": "",
+    "preparer_code": "",
 }
 for key, value in DEFAULTS.items():
     if key not in st.session_state:
         st.session_state[key] = value
+
+
+def current_agent_slug() -> str:
+    """Derives the isolation key from "Prepared by" plus a private numeric
+    code — not real per-user authentication (see property_slug()'s
+    docstring), just harder to guess than a name alone. Someone would need
+    to know both to land on the same slug and see another agent's saved
+    properties."""
+    name = st.session_state.get("preparer_name") or ""
+    code = st.session_state.get("preparer_code") or ""
+    return storage.slugify(f"{name}-{code}")
 
 
 def goto(view, slug=None, stage="csv"):
@@ -563,7 +575,7 @@ def render_menu():
     render_header("RootedReports")
     st.subheader("Get started")
 
-    properties = storage.list_properties()
+    properties = storage.list_properties(current_agent_slug())
 
     col1, col2 = st.columns(2)
     with col1, st.container(border=True):
@@ -576,12 +588,12 @@ def render_menu():
                     has_saved_report = bool(storage.load_history(slug))
                     row, jump_col, delete_col = st.columns([4, 2, 1])
                     with row:
-                        if st.button(profile.get("address") or slug, key=f"select-{slug}", use_container_width=True):
+                        if st.button(profile.get("address") or slug, key=f"select-{slug}", width="stretch"):
                             goto("property", slug)
                             st.rerun()
                     with jump_col:
                         if has_saved_report:
-                            if st.button("Jump to report", key=f"jump-{slug}", use_container_width=True):
+                            if st.button("Jump to report", key=f"jump-{slug}", width="stretch"):
                                 goto("property", slug, stage="review")
                                 st.rerun()
                     with delete_col:
@@ -594,7 +606,7 @@ def render_menu():
     with col2, st.container(border=True):
         st.markdown("**Add a new property**")
         st.caption("Upload an MLS cut sheet, or just type the address, to get started.")
-        if st.button("Add a new property", use_container_width=True):
+        if st.button("Add a new property", width="stretch"):
             goto("new_property")
             st.rerun()
 
@@ -639,8 +651,9 @@ def render_new_property():
             st.error("Couldn't find an address in that cut sheet — type it in above and try again.")
             st.stop()
 
-        slug = storage.slugify(final_address)
-        storage.save_profile(slug, profile)
+        agent_slug = current_agent_slug()
+        slug = storage.property_slug(agent_slug, final_address)
+        storage.save_profile(slug, profile, agent_slug)
         goto("property", slug)
         st.rerun()
 
@@ -702,9 +715,11 @@ def render_property():
 
 
 def render_csv_stage(profile):
-    name_col, brokerage_col = st.columns(2)
+    name_col, code_col, brokerage_col = st.columns([2, 1, 2])
     with name_col:
         st.text_input("Prepared by", key="preparer_name")
+    with code_col:
+        st.text_input("Access code", key="preparer_code", type="password", help="A private code only you know — combined with your name to keep your saved properties from being guessed by someone else typing your name.")
     with brokerage_col:
         st.text_input("Brokerage", key="preparer_brokerage")
     st.text_input("Contact info (optional — shown on the report if filled in)", key="preparer_contact")
@@ -869,7 +884,7 @@ def render_review_stage(slug, profile, history):
                 )
             else:
                 st.caption("No reductions found — price has only gone up or stayed flat in the data we have.")
-            st.dataframe(reductions["chronological"], use_container_width=True)
+            st.dataframe(reductions["chronological"], width="stretch")
         else:
             st.caption("No price history found in the uploaded reports.")
 
@@ -945,7 +960,7 @@ def render_review_stage(slug, profile, history):
             },
             column_order=["date", "quote", "source", "following_up", "follow_up_note"],
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             key="feedback_editor",
         )

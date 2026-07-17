@@ -205,7 +205,7 @@ def render_footer():
     _, mid, _ = st.columns([3, 1, 3])
     with mid:
         current_view = st.session_state.get("view")
-        if current_view != "terms" and st.button("Terms", key=f"terms-link-{current_view}", use_container_width=True):
+        if current_view != "terms" and st.button("Terms", key=f"terms-link-{current_view}", width="stretch"):
             # Parks where we came from rather than calling app.py's goto() —
             # a detour to read the Terms shouldn't reset in-progress work
             # (uploaded CSVs, extracted comps, etc.) the way navigating to a

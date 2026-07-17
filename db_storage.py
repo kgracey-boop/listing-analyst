@@ -30,11 +30,28 @@ CREATE TABLE IF NOT EXISTS history (
 );
 ALTER TABLE properties ADD COLUMN IF NOT EXISTS known_comps JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE properties ADD COLUMN IF NOT EXISTS known_feedback JSONB NOT NULL DEFAULT '{}'::jsonb;
+-- Per-agent isolation: which agent's properties these are, so one agent
+-- never lists/loads another's. Existing rows (pre-dating this column)
+-- default to 'unassigned' rather than silently vanishing from anyone's
+-- list — an empty-string default would make them invisible to everyone.
+ALTER TABLE properties ADD COLUMN IF NOT EXISTS agent_slug TEXT NOT NULL DEFAULT 'unassigned';
+CREATE INDEX IF NOT EXISTS idx_properties_agent_slug ON properties(agent_slug);
 """
 
 
-def slugify(address: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", (address or "").lower()).strip("-") or "unknown-property"
+def slugify(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-") or "unknown"
+
+
+def property_slug(agent_slug: str, address: str) -> str:
+    """The property's storage key, namespaced by agent — this is the whole
+    isolation mechanism: two agents working the same address never collide,
+    and an agent's own properties are found by filtering/prefixing on their
+    own agent_slug. Not real per-user authentication (anyone who knows
+    another agent's slug could still construct their key), just practical
+    separation for a small group of known, trusted agents sharing one
+    passcode-gated app — the same trust level the app already assumes."""
+    return f"{agent_slug or 'unassigned'}--{slugify(address)}"
 
 
 @contextmanager
@@ -50,9 +67,11 @@ def init_schema():
         conn.execute(SCHEMA)
 
 
-def list_properties():
+def list_properties(agent_slug: str):
     with _connect() as conn:
-        rows = conn.execute("SELECT slug, profile FROM properties ORDER BY created_at DESC").fetchall()
+        rows = conn.execute(
+            "SELECT slug, profile FROM properties WHERE agent_slug = %s ORDER BY created_at DESC", (agent_slug,)
+        ).fetchall()
     return [(row[0], row[1]) for row in rows]
 
 
@@ -62,14 +81,14 @@ def load_profile(slug: str):
     return row[0] if row else None
 
 
-def save_profile(slug: str, profile: dict):
+def save_profile(slug: str, profile: dict, agent_slug: str):
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO properties (slug, profile) VALUES (%s, %s)
+            INSERT INTO properties (slug, profile, agent_slug) VALUES (%s, %s, %s)
             ON CONFLICT (slug) DO UPDATE SET profile = EXCLUDED.profile
             """,
-            (slug, Jsonb(profile)),
+            (slug, Jsonb(profile), agent_slug),
         )
 
 

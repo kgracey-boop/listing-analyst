@@ -61,13 +61,25 @@ restrictions of Licensee's own MLS. Licensor is not responsible for
 Licensee's compliance with any third-party data license, including MLS
 rules of use.
 
-#### 6. Third-Party Processing
+#### 6. Data Storage, Isolation, and Third-Party Processing
 
 Reports and files uploaded to the Software are processed using Google's
-Gemini API to extract listing data, and resulting data is stored using
-Google Cloud/Supabase infrastructure to build a history of reports for each
-property. By using the Software, Licensee consents to this processing.
-Licensor does not sell Licensee data or client data to third parties.
+Gemini API to extract listing data. Property data, comparable listings, and
+buyer feedback are then stored (using Google Cloud/Supabase infrastructure)
+to build a running history for that property across future visits — this
+data is not deleted after each report, since ongoing comparison against
+prior activity is a core feature of the Software.
+
+Data is organized under the combination of the "Prepared by" name and the
+private access code entered on the same screen, and a Licensee only sees
+properties saved under that same combination. This is a practical
+separation between different agents' data, not a substitute for
+individually authenticated user accounts — the Software does not verify a
+Licensee's identity, only that their name and code match a prior visit, so
+this separation should not be relied on as a security guarantee. Licensee
+is responsible for keeping their access code private. By using the
+Software, Licensee consents to this storage and processing. Licensor does
+not sell Licensee data or client data to third parties.
 
 #### 7. Disclaimer of Warranties
 
