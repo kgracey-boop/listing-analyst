@@ -112,6 +112,7 @@ Extract into this JSON shape. Use null for anything not present. Do not guess.
   "bathrooms": number or null,
   "square_feet": number or null,
   "property_type": string or null,
+  "subdivision": string or null,
   "lot_size": string or null,
   "year_built": number or null,
   "mls_number": string or null,

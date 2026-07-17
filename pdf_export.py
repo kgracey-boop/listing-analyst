@@ -389,7 +389,10 @@ def build_pdf(
             pdf.caption_line("Data scope: " + " · ".join(scope_parts))
 
         chart_comps = filter_recent_closed(calc_comps, months=solds_window_months)
-        pdf.add_chart(price_position_chart(chart_comps, merged.get("list_price"), merged.get("days_on_market")))
+        market_rate_price = median_psf * merged["square_feet"] if median_psf and merged.get("square_feet") else None
+        pdf.add_chart(
+            price_position_chart(chart_comps, merged.get("list_price"), merged.get("days_on_market"), market_rate_price)
+        )
 
         # ---------------------------------------- Active listings (with links)
         active_comps = [c for c in calc_comps if c.get("status") == "active" and c.get("list_price")]

@@ -41,6 +41,13 @@ STATUS_COLORS = {
 # pre-existing good/bad connotation the way green or red might.
 SUBJECT_COLOR = "#4a3aa7"
 
+# The market-rate reference line (comps' median $/sqft, applied to the
+# subject's own square footage) — validated slot 7 (magenta). A different
+# color from SUBJECT_COLOR on purpose: these are two different concepts
+# (where you're actually priced vs. where the market's typical $/sqft would
+# put you) that can appear on the chart at the same time.
+MARKET_RATE_COLOR = "#e87ba4"
+
 
 def price_band_chart(price_bands: list, subject_band: str):
     """Emphasis bar chart: the subject's price band in the brand's gold
@@ -69,9 +76,13 @@ def price_band_chart(price_bands: list, subject_band: str):
     )
 
 
-def price_position_chart(comparable_listings: list, subject_price, subject_dom=None):
+def price_position_chart(comparable_listings: list, subject_price, subject_dom=None, market_rate_price=None):
     """Scatter plot: price vs. days on market for active/pending/closed
-    comps, colored by status. Returns None if there's nothing to plot."""
+    comps, colored by status. Returns None if there's nothing to plot.
+    market_rate_price (optional): comps' median $/sqft applied to the
+    subject's own square footage — a horizontal reference line showing
+    where the market's typical rate would price this listing, distinct
+    from the subject's own actual list price."""
     rows = []
     for c in comparable_listings:
         status = (c.get("status") or "").title()
@@ -88,6 +99,8 @@ def price_position_chart(comparable_listings: list, subject_price, subject_dom=N
     df = pd.DataFrame(rows)
 
     all_prices = df["price"].tolist() + ([subject_price] if subject_price else [])
+    if market_rate_price:
+        all_prices.append(market_rate_price)
     price_min, price_max = min(all_prices), max(all_prices)
     padding = max((price_max - price_min) * 0.1, 1)
     y_domain = [price_min - padding, price_max + padding]
@@ -131,5 +144,16 @@ def price_position_chart(comparable_listings: list, subject_price, subject_dom=N
             x="days_on_market:Q", y="price:Q", text="label:N"
         )
         layers.append(text)
+
+    if market_rate_price:
+        rate_df = pd.DataFrame({"price": [market_rate_price]})
+        rate_line = alt.Chart(rate_df).mark_rule(color=MARKET_RATE_COLOR, strokeDash=[2, 2], size=2).encode(y="price:Q")
+        layers.append(rate_line)
+
+        rate_label_df = pd.DataFrame({"price": [market_rate_price], "label": ["Market $/sqft rate"]})
+        rate_text = alt.Chart(rate_label_df).mark_text(
+            color=MARKET_RATE_COLOR, dy=-8, align="left", fontWeight="bold"
+        ).encode(y="price:Q", text="label:N")
+        layers.append(rate_text)
 
     return alt.layer(*layers).properties(height=280)

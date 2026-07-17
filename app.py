@@ -1,4 +1,5 @@
 import os
+import random
 import re
 import tempfile
 import threading
@@ -427,12 +428,15 @@ def goto(view, slug=None, stage="csv"):
 
 def _scroll_facts(placeholder, header_text, stop_event):
     """Runs on a background thread so the fact rotates *during* a blocking
-    Gemini call, not just once per file."""
+    Gemini call, not just once per file. Shuffled fresh per call rather than
+    always starting at index 0 — most uploads are quick enough that a
+    plain in-order cycle only ever showed the first couple of facts."""
+    facts = random.sample(RALEIGH_FACTS, len(RALEIGH_FACTS))
     i = 0
     while not stop_event.is_set():
         with placeholder.container():
             st.info(header_text)
-            st.caption(f"🌳🐿️ {RALEIGH_FACTS[i % len(RALEIGH_FACTS)]}")
+            st.caption(f"🌳🐿️ {facts[i % len(facts)]}")
         i += 1
         stop_event.wait(5.0)
 
@@ -567,7 +571,7 @@ def render_property():
 
     if stage == "csv":
         with st.expander("Property details (from MLS cut sheet)"):
-            for field in ["list_date", "days_on_market", "bedrooms", "bathrooms", "square_feet", "lot_size", "year_built", "mls_number"]:
+            for field in ["list_date", "days_on_market", "bedrooms", "bathrooms", "square_feet", "subdivision", "lot_size", "year_built", "mls_number"]:
                 if profile.get(field):
                     st.write(f"**{field.replace('_', ' ').title()}:** {profile[field]}")
             if profile.get("remarks"):
@@ -934,7 +938,10 @@ def render_review_stage(slug, profile, history):
                     key="solds_window_label",
                 )
                 comps_for_chart = filter_recent_closed(calc_comps, months=SOLDS_WINDOW_OPTIONS[solds_window_label])
-                position_chart = price_position_chart(comps_for_chart, merged.get("list_price"), merged.get("days_on_market"))
+                market_rate_price = median_psf * merged["square_feet"] if median_psf and merged.get("square_feet") else None
+                position_chart = price_position_chart(
+                    comps_for_chart, merged.get("list_price"), merged.get("days_on_market"), market_rate_price
+                )
                 if position_chart is not None:
                     st.altair_chart(position_chart, use_container_width=True)
                 else:
