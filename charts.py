@@ -48,6 +48,14 @@ SUBJECT_COLOR = "#4a3aa7"
 # put you) that can appear on the chart at the same time.
 MARKET_RATE_COLOR = "#e87ba4"
 
+# The closed-median DOM reference line — validated slot 8 (orange), the next
+# unused categorical slot after blue/aqua/yellow (status dots), violet
+# (subject), and magenta (market rate) are all already spoken for on this
+# same chart. Orange carries no pre-existing good/bad connotation the way
+# green or red would, which matters since a benchmark line isn't inherently
+# good or bad news on its own.
+DOM_BENCHMARK_COLOR = "#eb6834"
+
 
 def price_band_chart(price_bands: list, subject_band: str):
     """Emphasis bar chart: the subject's price band in the brand's gold
@@ -76,13 +84,19 @@ def price_band_chart(price_bands: list, subject_band: str):
     )
 
 
-def price_position_chart(comparable_listings: list, subject_price, subject_dom=None, market_rate_price=None):
+def price_position_chart(
+    comparable_listings: list, subject_price, subject_dom=None, market_rate_price=None, closed_median_dom=None
+):
     """Scatter plot: price vs. days on market for active/pending/closed
     comps, colored by status. Returns None if there's nothing to plot.
     market_rate_price (optional): comps' median $/sqft applied to the
     subject's own square footage — a horizontal reference line showing
     where the market's typical rate would price this listing, distinct
-    from the subject's own actual list price."""
+    from the subject's own actual list price.
+    closed_median_dom (optional): median days-on-market among CLOSED comps
+    only — a vertical reference line. Closed-only because a closed comp's
+    DOM is a final, completed number; an active/pending comp's DOM is still
+    climbing and would understate how long homes actually take to sell."""
     rows = []
     for c in comparable_listings:
         status = (c.get("status") or "").title()
@@ -156,4 +170,112 @@ def price_position_chart(comparable_listings: list, subject_price, subject_dom=N
         ).encode(y="price:Q", text="label:N")
         layers.append(rate_text)
 
+    if closed_median_dom is not None:
+        dom_line_df = pd.DataFrame({"days_on_market": [closed_median_dom]})
+        dom_line = alt.Chart(dom_line_df).mark_rule(
+            color=DOM_BENCHMARK_COLOR, strokeDash=[2, 2], size=2
+        ).encode(x="days_on_market:Q")
+        layers.append(dom_line)
+
+        dom_label_df = pd.DataFrame({"days_on_market": [closed_median_dom], "label": ["Closed median"]})
+        dom_text = alt.Chart(dom_label_df).mark_text(
+            color=DOM_BENCHMARK_COLOR, dy=-8, align="left", fontWeight="bold", angle=270
+        ).encode(x="days_on_market:Q", y=alt.value(10), text="label:N")
+        layers.append(dom_text)
+
     return alt.layer(*layers).properties(height=280)
+
+
+def absorption_chart(bucket_stats: list):
+    """Bar chart: months of supply per property-type bucket (plus New
+    Construction, if present) — one axis, one unit, genuinely comparable
+    across bars even though New Construction's number is computed from a
+    different qualifying date under the hood. bucket_stats is a list of
+    {"label": str, "months_of_supply": float, "highlight": bool} —
+    highlight marks the subject's own bucket in the brand's gold accent,
+    the same emphasis treatment price_band_chart uses. Direct-labeled since
+    there are only ever a handful of bars. Returns None if there's nothing
+    to plot."""
+    if not bucket_stats:
+        return None
+
+    df = pd.DataFrame(bucket_stats)
+    df["color_key"] = df["highlight"].apply(lambda h: "Your property type" if h else "Other")
+
+    bars = (
+        alt.Chart(df)
+        .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
+        .encode(
+            x=alt.X("label:N", sort=None, title=None, axis=alt.Axis(labelAngle=-30)),
+            y=alt.Y("months_of_supply:Q", title="Months of supply"),
+            color=alt.Color(
+                "color_key:N",
+                scale=alt.Scale(domain=["Your property type", "Other"], range=[CHART_GOLD, NEUTRAL_GRAY]),
+                legend=alt.Legend(title=None),
+            ),
+            tooltip=[
+                alt.Tooltip("label:N", title="Type"),
+                alt.Tooltip("months_of_supply:Q", title="Months of supply"),
+            ],
+        )
+    )
+
+    labels = (
+        alt.Chart(df)
+        .mark_text(dy=-8, fontWeight="bold")
+        .encode(x="label:N", y="months_of_supply:Q", text=alt.Text("months_of_supply:Q", format=".1f"))
+    )
+
+    return alt.layer(bars, labels).properties(height=280)
+
+
+def weekly_contracts_chart(weekly_counts: list):
+    """Bar chart: count of comps (already filtered to the subject's own
+    property type) that went under contract each week, over roughly the
+    last 2 years. Tooltip-only, no direct labels — with up to ~104 bars,
+    labeling every one would be unreadable clutter rather than a helpful
+    figure. Returns None if there's nothing to plot."""
+    if not weekly_counts:
+        return None
+
+    df = pd.DataFrame(weekly_counts)
+
+    return (
+        alt.Chart(df)
+        .mark_bar(color="#2a78d6")
+        .encode(
+            x=alt.X("week_start:T", title="Week"),
+            y=alt.Y("count:Q", title="Contracts that week"),
+            tooltip=[
+                alt.Tooltip("week_start:T", title="Week of"),
+                alt.Tooltip("count:Q", title="Contracts"),
+            ],
+        )
+        .properties(height=280)
+    )
+
+
+def price_reduction_trend_chart(monthly_pcts: list):
+    """Line chart: % of closed comps that had a price reduction before going
+    under contract, one point per month, trailing 12 months. monthly_pcts
+    comes from comp_price_reduction_stats()'s trend data, already gated
+    there on MIN_MONTHS_WITH_DATA — an empty list means not enough history
+    to trust a trend line yet. Returns None in that case."""
+    if not monthly_pcts:
+        return None
+
+    df = pd.DataFrame(monthly_pcts)
+
+    return (
+        alt.Chart(df)
+        .mark_line(color="#2a78d6", point=True, strokeWidth=2)
+        .encode(
+            x=alt.X("month:O", title="Month"),
+            y=alt.Y("pct:Q", title="% price drop before contract", scale=alt.Scale(domainMin=0)),
+            tooltip=[
+                alt.Tooltip("month:O", title="Month"),
+                alt.Tooltip("pct:Q", title="% price drop before contract"),
+            ],
+        )
+        .properties(height=280)
+    )

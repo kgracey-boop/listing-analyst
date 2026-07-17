@@ -20,7 +20,13 @@ except Exception:
 
 import db_storage as storage
 from branding import BRAND, inject_css, render_footer, render_header
-from charts import price_band_chart, price_position_chart
+from charts import (
+    absorption_chart,
+    price_band_chart,
+    price_position_chart,
+    price_reduction_trend_chart,
+    weekly_contracts_chart,
+)
 from comps_store import active_for_calculation, all_comps_list, also_saved_comps, also_viewed_comps, update_known_comps
 from csv_parser import parse_mls_csv
 from feedback_store import all_feedback_list, apply_feedback_edits, update_known_feedback
@@ -31,13 +37,18 @@ from market_stats import (
     bucket_property_type,
     comp_price_reduction_stats,
     compute_absorption,
+    compute_new_construction_absorption,
     data_scope_summary,
     dom_benchmark,
     filter_recent_closed,
     match_price_band,
+    median_comp_days_on_market,
     median_comp_price_per_sqft,
+    median_list_to_contract_days,
     price_per_sqft,
     price_reductions,
+    subdivision_vs_zip_absorption,
+    weekly_contracts,
 )
 from merge import address_key, empty_merged, merge_extractions, total_views
 from pdf_export import build_pdf
@@ -139,14 +150,6 @@ def money(value) -> str:
     return f"\\${value:,.0f}"
 
 
-def escape_dollars(text) -> str:
-    """Same fix as money(), but for arbitrary externally-extracted strings
-    that may already contain their own $ signs (e.g. a price band like
-    "$310,000 - $319,999" straight from Gemini) rather than a number we're
-    formatting ourselves."""
-    return str(text).replace("$", "\\$")
-
-
 def absorption_caption(stats: dict) -> str:
     if stats["months_of_supply"] is None:
         return ""
@@ -187,20 +190,101 @@ def data_confidence_warning(row_count: int, stats: dict) -> str:
 
 
 def render_property_type_breakdown(comparable_listings: list, subject_bucket: str = None):
-    """Absorption rate per property type — blending townhomes and single
-    family (say) into one number hides real differences in how fast each
-    actually moves in the same market at the same time."""
+    """Absorption rate per property type, as a bar chart — blending
+    townhomes and single family (say) into one number hides real
+    differences in how fast each actually moves in the same market at the
+    same time. New Construction (if present) gets its own bar computed
+    from contract date instead of close date, since a new-construction
+    close date is stretched out by real build time rather than reflecting
+    market speed the way it does for resale — same months-of-supply units,
+    genuinely comparable to the other bars."""
     by_type = absorption_by_property_type(comparable_listings)
-    if len(by_type) <= 1:
-        return  # nothing to break out — only one property type present
+    nc_stats = compute_new_construction_absorption(comparable_listings)
+
+    bars, skipped = [], []
+    for bucket, stats in sorted(by_type.items(), key=lambda kv: -kv[1]["active_count"] - kv[1]["closed_count_total"]):
+        if stats["months_of_supply"] is not None:
+            bars.append({"label": bucket, "months_of_supply": stats["months_of_supply"], "highlight": bucket == subject_bucket})
+        else:
+            skipped.append(bucket)
+
+    has_new_construction = nc_stats["months_of_supply"] is not None
+    if has_new_construction:
+        postal_codes = sorted({c["postal_code"] for c in comparable_listings if c.get("postal_code")})
+        nc_label = f"New Construction in {postal_codes[0]}" if len(postal_codes) == 1 else "New Construction"
+        bars.append({"label": nc_label, "months_of_supply": nc_stats["months_of_supply"], "highlight": False})
+
+    if len(bars) <= 1:
+        return  # nothing worth breaking out — not enough distinct, computable buckets to compare
 
     st.write("By property type:")
-    for bucket, stats in sorted(by_type.items(), key=lambda kv: -kv[1]["active_count"] - kv[1]["closed_count_total"]):
-        label = f"**{bucket}**" + (" ← your listing" if subject_bucket and bucket == subject_bucket else "")
-        if stats["months_of_supply"] is not None:
-            st.caption(f"{label}: {stats['months_of_supply']} months of supply ({stats['active_count']} active, ~{stats['monthly_pace']}/month sold)")
-        else:
-            st.caption(f"{label}: {stats['active_count']} active, not enough sold data to calculate a rate")
+    chart = absorption_chart(bars)
+    if chart is not None:
+        st.altair_chart(chart, use_container_width=True)
+
+    if has_new_construction:
+        st.caption(
+            "New Construction reflects time from listing to going under contract, not closing — "
+            "this accounts for build/completion time that doesn't apply to resale homes."
+        )
+        nc_days = median_list_to_contract_days(comparable_listings, new_construction=True)
+        resale_days = median_list_to_contract_days(comparable_listings, new_construction=False)
+        if nc_days is not None or resale_days is not None:
+            stat_cols = st.columns(2)
+            if nc_days is not None:
+                stat_cols[0].metric("New Construction: list to contract", f"{nc_days:.0f} days")
+            if resale_days is not None:
+                stat_cols[1].metric("Resale: list to contract", f"{resale_days:.0f} days")
+
+    if skipped:
+        st.caption(f"Not enough sold data yet to calculate a rate for: {', '.join(skipped)}.")
+
+
+def render_zip_vs_subdivision_comparison(comparable_listings: list, subject_subdivision: str, subject_property_type: str):
+    """Side-by-side comparison of the subject's own subdivision against the
+    rest of the zip it sits in, both filtered to the subject's own property
+    type first. Only renders when the subject's subdivision is known and
+    Amy's CSV pull is zip-wide enough to actually have something outside
+    the subdivision to compare against."""
+    result = subdivision_vs_zip_absorption(comparable_listings, subject_subdivision, subject_property_type)
+    if result is None:
+        return
+
+    sub_stats, zip_stats = result["subdivision"], result["rest_of_zip"]
+    bars = []
+    if sub_stats["months_of_supply"] is not None:
+        bars.append({"label": subject_subdivision, "months_of_supply": sub_stats["months_of_supply"], "highlight": True})
+    if zip_stats["months_of_supply"] is not None:
+        postal_codes = sorted({c["postal_code"] for c in comparable_listings if c.get("postal_code")})
+        zip_label = f"Rest of {postal_codes[0]}" if len(postal_codes) == 1 else "Rest of ZIP"
+        bars.append({"label": zip_label, "months_of_supply": zip_stats["months_of_supply"], "highlight": False})
+
+    if len(bars) < 2:
+        return  # not enough data on one or both sides yet to show a meaningful comparison
+
+    st.write(f"{subject_subdivision} vs. the rest of the zip:")
+    chart = absorption_chart(bars)
+    if chart is not None:
+        st.altair_chart(chart, use_container_width=True)
+
+
+def render_weekly_contracts_chart(comparable_listings: list, subject_property_type: str):
+    """Weekly contract-signing pace for the subject's own property type,
+    over roughly the last 2 years — a market-pulse view, not a comparison,
+    so it's filtered narrower than the absorption charts on purpose:
+    townhome and single-family buyers can react to rate moves on very
+    different timelines."""
+    if not subject_property_type:
+        return
+    weekly = weekly_contracts(comparable_listings, subject_property_type)
+    if not any(w["count"] for w in weekly):
+        return  # no contract-date data yet for this property type
+
+    bucket = bucket_property_type(subject_property_type)
+    st.write(f"Weekly contracts — {bucket} (last ~2 years):")
+    chart = weekly_contracts_chart(weekly)
+    if chart is not None:
+        st.altair_chart(chart, use_container_width=True)
 
 
 def build_listing_url(link_or_reference):
@@ -635,6 +719,8 @@ def render_csv_stage(profile):
         st.caption(absorption_caption(stats))
         subject_bucket = bucket_property_type(profile.get("property_type")) if profile.get("property_type") else None
         render_property_type_breakdown(result["comparable_listings"], subject_bucket)
+        render_zip_vs_subdivision_comparison(result["comparable_listings"], profile.get("subdivision"), profile.get("property_type"))
+        render_weekly_contracts_chart(result["comparable_listings"], profile.get("property_type"))
         if result["unmapped_fields"]:
             st.caption("Some columns in this file weren't recognized — the counts above might be incomplete.")
         with st.expander("See the comps"):
@@ -806,6 +892,9 @@ def render_review_stage(slug, profile, history):
                     f"- Price-drop rate among closed comps looks **{trend['direction']}** over the last year "
                     f"(~{trend['earlier_pct']}% earlier vs ~{trend['recent_pct']}% more recently)."
                 )
+                trend_chart = price_reduction_trend_chart(trend["monthly_pcts"])
+                if trend_chart is not None:
+                    st.altair_chart(trend_chart, use_container_width=True)
             else:
                 st.caption(
                     f"- Not enough data yet to tell whether price drops are trending over the last year "
@@ -903,6 +992,8 @@ def render_review_stage(slug, profile, history):
                     st.caption(absorption_caption(stats))
                 subject_bucket = bucket_property_type(profile.get("property_type")) if profile.get("property_type") else None
                 render_property_type_breakdown(calc_comps, subject_bucket)
+                render_zip_vs_subdivision_comparison(calc_comps, profile.get("subdivision"), profile.get("property_type"))
+                render_weekly_contracts_chart(calc_comps, profile.get("property_type"))
 
                 median_psf = median_comp_price_per_sqft(calc_comps)
                 if median_psf:
@@ -939,8 +1030,12 @@ def render_review_stage(slug, profile, history):
                 )
                 comps_for_chart = filter_recent_closed(calc_comps, months=SOLDS_WINDOW_OPTIONS[solds_window_label])
                 market_rate_price = median_psf * merged["square_feet"] if median_psf and merged.get("square_feet") else None
+                closed_median_dom = median_comp_days_on_market(
+                    [c for c in comps_for_chart if c.get("status") == "closed"]
+                )
                 position_chart = price_position_chart(
-                    comps_for_chart, merged.get("list_price"), merged.get("days_on_market"), market_rate_price
+                    comps_for_chart, merged.get("list_price"), merged.get("days_on_market"),
+                    market_rate_price, closed_median_dom,
                 )
                 if position_chart is not None:
                     st.altair_chart(position_chart, use_container_width=True)
@@ -962,11 +1057,6 @@ def render_review_stage(slug, profile, history):
                 band_chart = price_band_chart(merged["price_bands"], band)
                 if band_chart is not None:
                     st.altair_chart(band_chart, use_container_width=True)
-
-                st.write("Showings by price band:")
-                for b in merged["price_bands"]:
-                    marker = " **← your listing**" if band and b.get("band") == band else ""
-                    st.caption(f"- {escape_dollars(b['band'])}: {b['showing_count']} showings{marker}")
 
     if merged["_conflicts"] or merged["notes_on_missing_or_unclear_data"]:
         with st.expander("Data quality notes"):

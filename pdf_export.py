@@ -12,22 +12,33 @@ from fpdf import FPDF
 from fpdf.fonts import FontFace
 
 from branding import BRAND
-from charts import price_band_chart, price_position_chart
+from charts import (
+    absorption_chart,
+    price_band_chart,
+    price_position_chart,
+    price_reduction_trend_chart,
+    weekly_contracts_chart,
+)
 from comps_store import also_saved_comps, also_viewed_comps
 from market_stats import (
     MIN_MONTHS_WITH_DATA,
     bucket_property_type,
     compute_absorption,
+    compute_new_construction_absorption,
     absorption_by_property_type,
     comp_price_reduction_stats,
     data_scope_summary,
     dom_benchmark,
     filter_recent_closed,
     match_price_band,
+    median_comp_days_on_market,
     median_comp_price_per_sqft,
+    median_list_to_contract_days,
     price_per_sqft,
     price_reductions,
+    subdivision_vs_zip_absorption,
     try_parse_date,
+    weekly_contracts,
 )
 
 MIN_TOTAL_COMPS = 10
@@ -312,6 +323,9 @@ def build_pdf(
                     f"Price-drop rate among closed comps looks {trend['direction']} over the last year "
                     f"(~{trend['earlier_pct']}% earlier vs ~{trend['recent_pct']}% more recently)."
                 )
+                trend_chart = price_reduction_trend_chart(trend["monthly_pcts"])
+                if trend_chart is not None:
+                    pdf.add_chart(trend_chart)
             else:
                 pdf.caption_line(
                     f"Not enough data yet to tell whether price drops are trending over the last year "
@@ -338,18 +352,68 @@ def build_pdf(
             pdf.caption_line(_absorption_caption(stats))
 
         by_type = absorption_by_property_type(calc_comps)
-        if len(by_type) > 1:
-            subject_bucket = bucket_property_type(profile.get("property_type")) if profile.get("property_type") else None
+        nc_stats = compute_new_construction_absorption(calc_comps)
+        subject_bucket = bucket_property_type(profile.get("property_type")) if profile.get("property_type") else None
+
+        bars, skipped = [], []
+        for bucket, b_stats in sorted(by_type.items(), key=lambda kv: -kv[1]["active_count"] - kv[1]["closed_count_total"]):
+            if b_stats["months_of_supply"] is not None:
+                bars.append({"label": bucket, "months_of_supply": b_stats["months_of_supply"], "highlight": bucket == subject_bucket})
+            else:
+                skipped.append(bucket)
+
+        has_new_construction = nc_stats["months_of_supply"] is not None
+        if has_new_construction:
+            postal_codes = sorted({c["postal_code"] for c in calc_comps if c.get("postal_code")})
+            nc_label = f"New Construction in {postal_codes[0]}" if len(postal_codes) == 1 else "New Construction"
+            bars.append({"label": nc_label, "months_of_supply": nc_stats["months_of_supply"], "highlight": False})
+
+        if len(bars) > 1:
             pdf.body_line("By property type:")
-            for bucket, b_stats in sorted(by_type.items(), key=lambda kv: -kv[1]["active_count"] - kv[1]["closed_count_total"]):
-                marker = " (your listing)" if subject_bucket and bucket == subject_bucket else ""
-                if b_stats["months_of_supply"] is not None:
-                    pdf.caption_line(
-                        f"{bucket}{marker}: {b_stats['months_of_supply']} months of supply "
-                        f"({b_stats['active_count']} active, ~{b_stats['monthly_pace']}/month sold)"
-                    )
-                else:
-                    pdf.caption_line(f"{bucket}{marker}: {b_stats['active_count']} active, not enough sold data to calculate a rate")
+            chart = absorption_chart(bars)
+            if chart is not None:
+                pdf.add_chart(chart)
+
+            if has_new_construction:
+                pdf.caption_line(
+                    "New Construction reflects time from listing to going under contract, not closing - "
+                    "this accounts for build/completion time that doesn't apply to resale homes."
+                )
+                nc_days = median_list_to_contract_days(calc_comps, new_construction=True)
+                resale_days = median_list_to_contract_days(calc_comps, new_construction=False)
+                if nc_days is not None:
+                    pdf.caption_line(f"New Construction: {nc_days:.0f} days from list to contract")
+                if resale_days is not None:
+                    pdf.caption_line(f"Resale: {resale_days:.0f} days from list to contract")
+
+            if skipped:
+                pdf.caption_line(f"Not enough sold data yet to calculate a rate for: {', '.join(skipped)}.")
+
+        zip_compare = subdivision_vs_zip_absorption(calc_comps, profile.get("subdivision"), profile.get("property_type"))
+        if zip_compare is not None:
+            sub_stats, zip_stats = zip_compare["subdivision"], zip_compare["rest_of_zip"]
+            zip_bars = []
+            if sub_stats["months_of_supply"] is not None:
+                zip_bars.append({"label": profile["subdivision"], "months_of_supply": sub_stats["months_of_supply"], "highlight": True})
+            if zip_stats["months_of_supply"] is not None:
+                postal_codes = sorted({c["postal_code"] for c in calc_comps if c.get("postal_code")})
+                zip_label = f"Rest of {postal_codes[0]}" if len(postal_codes) == 1 else "Rest of ZIP"
+                zip_bars.append({"label": zip_label, "months_of_supply": zip_stats["months_of_supply"], "highlight": False})
+
+            if len(zip_bars) == 2:
+                pdf.body_line(f"{profile['subdivision']} vs. the rest of the zip:")
+                zip_chart = absorption_chart(zip_bars)
+                if zip_chart is not None:
+                    pdf.add_chart(zip_chart)
+
+        if profile.get("property_type"):
+            weekly = weekly_contracts(calc_comps, profile["property_type"])
+            if any(w["count"] for w in weekly):
+                bucket_label = bucket_property_type(profile["property_type"])
+                pdf.body_line(f"Weekly contracts - {bucket_label} (last ~2 years):")
+                weekly_chart = weekly_contracts_chart(weekly)
+                if weekly_chart is not None:
+                    pdf.add_chart(weekly_chart)
 
         median_psf = median_comp_price_per_sqft(calc_comps)
         if median_psf:
@@ -390,8 +454,12 @@ def build_pdf(
 
         chart_comps = filter_recent_closed(calc_comps, months=solds_window_months)
         market_rate_price = median_psf * merged["square_feet"] if median_psf and merged.get("square_feet") else None
+        closed_median_dom = median_comp_days_on_market([c for c in chart_comps if c.get("status") == "closed"])
         pdf.add_chart(
-            price_position_chart(chart_comps, merged.get("list_price"), merged.get("days_on_market"), market_rate_price)
+            price_position_chart(
+                chart_comps, merged.get("list_price"), merged.get("days_on_market"),
+                market_rate_price, closed_median_dom,
+            )
         )
 
         # ---------------------------------------- Active listings (with links)
@@ -455,9 +523,6 @@ def build_pdf(
         pdf.section_title("Showings by Price Band")
         band = match_price_band(merged.get("list_price"), merged["price_bands"])
         pdf.add_chart(price_band_chart(merged["price_bands"], band))
-        for b in merged["price_bands"]:
-            marker = "  <- your listing" if band and b.get("band") == band else ""
-            pdf.caption_line(f"{b['band']}: {b['showing_count']} showings{marker}")
 
     # ------------------------------------------------------------- Feedback
     feedback_entries = known_feedback if known_feedback is not None else (merged.get("feedback") or [])

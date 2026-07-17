@@ -136,6 +136,147 @@ def absorption_by_property_type(comparable_listings: list, as_of=None) -> dict:
     return {bucket: compute_absorption(listings, as_of=as_of) for bucket, listings in buckets.items()}
 
 
+def _normalize_subdivision(value):
+    if not value:
+        return None
+    return value.strip().lower()
+
+
+def subdivision_vs_zip_absorption(comparable_listings: list, subject_subdivision: str, subject_property_type: str, as_of=None):
+    """
+    Compares months-of-supply for the subject's own subdivision against the
+    rest of the zip — both filtered to the subject's own property type
+    bucket first, since comparing a house to condos that happen to share a
+    zip code isn't a fair comparison. Returns None if the subject's
+    subdivision isn't known (nothing to split the zip-wide pull on).
+    """
+    target = _normalize_subdivision(subject_subdivision)
+    if not target:
+        return None
+
+    bucket = bucket_property_type(subject_property_type)
+    same_type = [c for c in comparable_listings if bucket_property_type(c.get("property_type")) == bucket]
+
+    subdivision_comps = [c for c in same_type if _normalize_subdivision(c.get("subdivision")) == target]
+    rest_of_zip_comps = [c for c in same_type if _normalize_subdivision(c.get("subdivision")) != target]
+
+    return {
+        "subdivision": compute_absorption(subdivision_comps, as_of=as_of),
+        "rest_of_zip": compute_absorption(rest_of_zip_comps, as_of=as_of),
+    }
+
+
+WEEKLY_CONTRACTS_WEEKS = 104  # roughly 2 years
+
+
+def weekly_contracts(comparable_listings: list, subject_property_type: str, weeks: int = WEEKLY_CONTRACTS_WEEKS, as_of=None) -> list:
+    """
+    Count of comps — filtered to the subject's own property type bucket —
+    that went under contract each week, over the trailing ~2 years. A
+    market-pulse view of contract velocity, not a comparison metric like
+    the absorption charts: townhomes and single-family buyers can react to
+    rate moves on very different timelines, so blending them here would
+    hide exactly the signal this is meant to show. Weeks with zero
+    contracts are included as zero, not skipped, so a real dead spot in the
+    market doesn't silently compress out of the timeline.
+    """
+    as_of = as_of or datetime.today()
+    bucket = bucket_property_type(subject_property_type)
+    same_type = [c for c in comparable_listings if bucket_property_type(c.get("property_type")) == bucket]
+
+    cutoff = as_of - timedelta(weeks=weeks)
+
+    def week_start(d):
+        return d - timedelta(days=d.weekday())
+
+    start_week, end_week = week_start(cutoff), week_start(as_of)
+
+    counts = {}
+    current = start_week
+    while current <= end_week:
+        counts[current.date().isoformat()] = 0
+        current += timedelta(weeks=1)
+
+    for c in same_type:
+        contract_date = try_parse_date(c.get("contract_date"))
+        if contract_date is None or contract_date < cutoff or contract_date > as_of:
+            continue
+        key = week_start(contract_date).date().isoformat()
+        if key in counts:
+            counts[key] += 1
+
+    return [{"week_start": k, "count": v} for k, v in sorted(counts.items())]
+
+
+def compute_new_construction_absorption(comparable_listings: list, as_of=None) -> dict:
+    """
+    Same months-of-supply formula as compute_absorption(), but scoped to New
+    Construction comps and using Purchase Contract Date as the "sold" event
+    instead of Close Date. A new-construction close date is stretched out by
+    real build time (a home can sit under contract for months waiting on
+    completion) — contract date is the actual buyer-commitment signal, and
+    it's available on both pending and closed rows since either one already
+    went under contract, regardless of whether it's closed yet.
+    """
+    as_of = as_of or datetime.today()
+    cutoff = as_of - timedelta(days=TRAILING_DAYS)
+
+    nc = [c for c in comparable_listings if c.get("new_construction") is True]
+    active = [c for c in nc if c.get("status") == "active"]
+    under_contract = [c for c in nc if c.get("status") in ("pending", "closed")]
+
+    result = {
+        "active_count": len(active),
+        "under_contract_count_total": len(under_contract),
+        "under_contract_count_trailing": 0,
+        "divisor_months": None,
+        "monthly_pace": None,
+        "months_of_supply": None,
+    }
+
+    all_contract_dates = [d for d in (try_parse_date(c.get("contract_date")) for c in under_contract) if d]
+    if not active or not all_contract_dates:
+        return result
+
+    contracts_in_window = [d for d in all_contract_dates if d >= cutoff]
+    result["under_contract_count_trailing"] = len(contracts_in_window)
+    if not contracts_in_window:
+        return result
+
+    # Same "use however much history exists" fallback as compute_absorption()
+    # — a subdivision that's only recently started closing under-contract
+    # deals shouldn't have its pace penalized by assuming a full year existed.
+    earliest = min(all_contract_dates)
+    available_months = max((as_of - earliest).days / 30.0, 1)
+    divisor_months = min(STANDARD_DIVISOR_MONTHS, available_months)
+    result["divisor_months"] = round(divisor_months, 1)
+
+    monthly_pace = len(contracts_in_window) / divisor_months
+    result["monthly_pace"] = round(monthly_pace, 1)
+    result["months_of_supply"] = round(len(active) / monthly_pace, 1)
+
+    return result
+
+
+def median_list_to_contract_days(comparable_listings: list, new_construction: bool = None):
+    """Median days from list date to contract date. new_construction=True/
+    False filters to that cohort; None uses every comp with both dates
+    regardless of construction status. Rows missing either date, or with a
+    contract date before the list date (bad data), are skipped rather than
+    guessed at."""
+    rows = comparable_listings
+    if new_construction is not None:
+        rows = [c for c in rows if c.get("new_construction") is new_construction]
+
+    days = []
+    for c in rows:
+        list_d = try_parse_date(c.get("list_date"))
+        contract_d = try_parse_date(c.get("contract_date"))
+        if list_d and contract_d and contract_d >= list_d:
+            days.append((contract_d - list_d).days)
+    return _median(days)
+
+
 def data_scope_summary(comparable_listings: list) -> dict:
     """
     Purely data-derived disclosure of what scope produced the comp figures —
@@ -295,6 +436,7 @@ def comp_price_reduction_stats(comparable_listings: list, as_of=None) -> dict:
             "earlier_pct": None,
             "recent_pct": None,
             "direction": None,
+            "monthly_pcts": [],
         },
     }
 
@@ -318,6 +460,18 @@ def comp_price_reduction_stats(comparable_listings: list, as_of=None) -> dict:
         return result
 
     ordered_keys = sorted(usable_months.keys())
+
+    # Exposed for the price-drop trend chart — same months, gated on the
+    # same MIN_MONTHS_WITH_DATA threshold as the earlier/recent split below,
+    # so the chart never shows with less data than the trend label would.
+    result["trend"]["monthly_pcts"] = [
+        {
+            "month": f"{y:04d}-{m:02d}",
+            "pct": round(100 * usable_months[(y, m)]["reduced"] / usable_months[(y, m)]["known"]),
+        }
+        for (y, m) in ordered_keys
+    ]
+
     midpoint = len(ordered_keys) // 2
     earlier_keys, recent_keys = ordered_keys[:midpoint], ordered_keys[midpoint:]
     if not earlier_keys or not recent_keys:

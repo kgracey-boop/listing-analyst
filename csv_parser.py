@@ -15,6 +15,9 @@ FIELD_ALIASES = {
     "square_feet": ["sqft", "sq ft", "square feet", "living area", "total sqft", "heated sqft"],
     "days_on_market": ["dom", "days on market", "cdom", "cumulative dom"],
     "close_date": ["close date", "sold date", "settlement date"],
+    "list_date": ["listing contract date", "list date", "listing date"],
+    "contract_date": ["purchase contract date", "contract date", "under contract date"],
+    "new_construction": ["new construction yn", "new construction", "new construction y/n"],
     "link_or_reference": ["mls #", "mls#", "mls number", "listing id", "mls id"],
     "property_type": ["property sub type", "property type", "property subtype", "dwelling type", "type"],
     "subdivision": ["subdivision-free text", "subdivision", "neighborhood"],
@@ -88,6 +91,20 @@ def _parse_status(value):
     return "unrecognized"
 
 
+def _parse_yn(value):
+    """Y/N flags don't guess on a blank or unrecognized value — None means
+    "unknown", not "no", so callers filtering for new construction never
+    silently misclassify a row the source just didn't answer."""
+    if not value:
+        return None
+    v = value.strip().lower()
+    if v in ("y", "yes", "true", "1"):
+        return True
+    if v in ("n", "no", "false", "0"):
+        return False
+    return None
+
+
 def parse_mls_csv(file_obj) -> dict:
     """
     file_obj: a file-like object (e.g. from Streamlit's file_uploader).
@@ -110,6 +127,9 @@ def parse_mls_csv(file_obj) -> dict:
             "square_feet": _parse_number(row.get(column_map.get("square_feet"))),
             "days_on_market": _parse_number(row.get(column_map.get("days_on_market"))),
             "close_date": (row.get(column_map.get("close_date"), "") or "").strip() or None,
+            "list_date": (row.get(column_map.get("list_date"), "") or "").strip() or None,
+            "contract_date": (row.get(column_map.get("contract_date"), "") or "").strip() or None,
+            "new_construction": _parse_yn(row.get(column_map.get("new_construction"), "")),
             "link_or_reference": (row.get(column_map.get("link_or_reference"), "") or "").strip() or None,
             "property_type": (row.get(column_map.get("property_type"), "") or "").strip() or None,
             "subdivision": (row.get(column_map.get("subdivision"), "") or "").strip() or None,
