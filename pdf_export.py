@@ -15,7 +15,7 @@ import html as html_lib
 import vl_convert as vlc
 from weasyprint import HTML as WeasyHTML
 
-from branding import BRAND
+from branding import BRAND, LOGO_HEADER_B64
 from charts import (
     absorption_chart,
     price_band_chart,
@@ -58,6 +58,15 @@ def _esc(value) -> str:
     if value is None:
         return ""
     return html_lib.escape(str(value))
+
+
+def _css_str_esc(value) -> str:
+    """Escapes a value for use inside a CSS string literal (the @page
+    footer's `content: "..."`) — backslash and double-quote only, since
+    HTML-escaping would be the wrong kind of escaping here."""
+    if value is None:
+        return ""
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _build_listing_url(link_or_reference):
@@ -176,7 +185,7 @@ CSS_TEMPLATE = """
     size: Letter;
     margin: 14mm 12mm 16mm 12mm;
     @bottom-center {{
-        content: "{agent_name} · {brokerage}  |  Page " counter(page);
+        content: "{footer_text}  |  Page " counter(page);
         font-family: 'Work Sans', sans-serif;
         font-size: 8.5pt;
         color: {slate};
@@ -198,6 +207,17 @@ body {{
     margin: -14mm -12mm 6mm -12mm;
     padding: 10mm 12mm 6mm 12mm;
     border-bottom: 3px solid {gold};
+    position: relative;
+}}
+.hero-text {{
+    max-width: 140mm;
+}}
+.hero-logo {{
+    position: absolute;
+    top: 8mm;
+    right: 12mm;
+    width: 20mm;
+    height: auto;
 }}
 .hero h1 {{
     font-family: 'Belleza', sans-serif;
@@ -287,12 +307,20 @@ def build_pdf(
     calc_comps: list = None,
     solds_window_months: int = 3,
     known_feedback: list = None,
+    prepared_by: str = None,
+    brokerage: str = None,
+    contact: str = None,
 ) -> bytes:
     title_text = profile.get("address") or "RootedReports"
+    # "Prepared by"/brokerage/contact reflect whoever's actually using the
+    # tool for this report, distinct from who owns the software (that's
+    # fixed to BRAND['agent_name'], and lives in the Terms of Use, not here).
+    prepared_by = prepared_by or BRAND["agent_name"]
+    footer_text = f"{prepared_by} · {brokerage}" if brokerage else prepared_by
 
     css = CSS_TEMPLATE.format(
         navy=BRAND["navy"], gold=BRAND["gold"], slate=BRAND["slate"], mist=BRAND["mist"],
-        agent_name=BRAND["agent_name"], brokerage=BRAND["brokerage"],
+        footer_text=_css_str_esc(footer_text),
     )
 
     sections = []
@@ -559,14 +587,23 @@ def build_pdf(
     if commentary:
         sections.append(_section("Agent Commentary", f'<p class="body-line">{_esc(commentary)}</p>'))
 
+    subtitle_line = f"{_esc(brokerage)} · prepared by {_esc(prepared_by)}" if brokerage else f"Prepared by {_esc(prepared_by)}"
+    contact_html = f'<p class="hero-contact">{_esc(contact)}</p>' if contact else ""
+
+    logo_html = f'<img class="hero-logo" src="data:image/png;base64,{LOGO_HEADER_B64}" alt="Rooted Reports">' if LOGO_HEADER_B64 else ""
+
     body_html = "".join(sections)
     full_html = f"""<!doctype html>
 <html>
 <head><meta charset="utf-8"><style>{css}</style></head>
 <body>
 <div class="hero">
-    <h1>{_esc(title_text)}</h1>
-    <p>{_esc(BRAND['brokerage'])} · prepared by {_esc(BRAND['agent_name'])}</p>
+    <div class="hero-text">
+        <h1>{_esc(title_text)}</h1>
+        <p>{subtitle_line}</p>
+        {contact_html}
+    </div>
+    {logo_html}
 </div>
 {body_html}
 </body>

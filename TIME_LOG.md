@@ -47,6 +47,34 @@ short summary of what actually got done.
   163 subdivisions, 501 genuine New Construction rows) — confirmed a real
   50-day vs. 27-day list-to-contract gap between New Construction and resale
 
+## 2026-07-17 (continued) — ~2 hours
+
+- Found and fixed a real bug behind blank/missing-chart pages in the PDF:
+  no chart set an explicit width, so Vega-Lite's default sizing rendered
+  some charts far too narrow/tall outside Streamlit's container-stretch
+  behavior — one was taller than the page itself
+- Rewrote the PDF export from fpdf2 to real HTML/CSS via WeasyPrint for a
+  much more polished look (same brand fonts/palette, charts as inline SVG
+  instead of rasterized images) — discussed the tradeoffs (reliability of a
+  server-generated PDF vs. browser print-to-PDF) before committing to it
+- Deploy troubleshooting: Streamlit Cloud's Debian image needed a different
+  apt package name for gdk-pixbuf than what shipped in packages.txt
+- Security discussion — identified the biggest real gap (no data isolation
+  between agents sharing one passcode/database) ahead of onboarding April
+- Added a Terms of Use page (own module, linked from the footer only),
+  drafted as a real commercial software license — ownership, restricted
+  license grant, explicit right to license/sell to other agents, MLS
+  compliance responsibility, third-party processing disclosure
+- Made "Prepared by," brokerage, and contact info user-editable fields
+  (Step 1) instead of hardcoded to Kevin/Coldwell Banker Advantage — flows
+  through to both the on-screen header and the PDF; fixed an unescaped-HTML
+  gap in the same code while touching it
+- Added a real progress bar to the multi-file loading screen (was text-only)
+- Incorporated the new Rooted Reports logo — removed the white background,
+  swapped in a white color variant specifically for the navy header/PDF
+  hero (much higher contrast than the brown original there), kept the
+  brown version for the browser favicon
+
 ## 2026-07-16 (evening session) — ~3 hours
 
 - Built sample charts (price-band highlight, price-vs-days-on-market by

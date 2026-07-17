@@ -20,6 +20,7 @@ except Exception:
 
 import db_storage as storage
 from branding import BRAND, inject_css, render_footer, render_header
+from legal import render_terms
 from charts import (
     absorption_chart,
     price_band_chart,
@@ -53,7 +54,7 @@ from market_stats import (
 from merge import address_key, empty_merged, merge_extractions, total_views
 from pdf_export import build_pdf
 
-st.set_page_config(page_title="RootedReports", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="RootedReports", page_icon="assets/favicon.png", layout="wide")
 inject_css()
 
 
@@ -491,6 +492,9 @@ DEFAULTS = {
     "quiet_errors": [],
     "known_comps": None,
     "known_feedback": None,
+    "preparer_name": "April Auman",
+    "preparer_brokerage": "Coldwell Banker Advantage",
+    "preparer_contact": "",
 }
 for key, value in DEFAULTS.items():
     if key not in st.session_state:
@@ -510,16 +514,22 @@ def goto(view, slug=None, stage="csv"):
     st.session_state["known_feedback"] = None
 
 
-def _scroll_facts(placeholder, header_text, stop_event):
+def _scroll_facts(placeholder, header_text, stop_event, progress=None):
     """Runs on a background thread so the fact rotates *during* a blocking
     Gemini call, not just once per file. Shuffled fresh per call rather than
     always starting at index 0 — most uploads are quick enough that a
-    plain in-order cycle only ever showed the first couple of facts."""
+    plain in-order cycle only ever showed the first couple of facts.
+    progress (optional): a 0-1 fraction shown as a progress bar — e.g. while
+    working on file 1 of 5, pass 0.2, not 0.0, since the bar reflects how far
+    through the batch we're currently positioned, not how many are fully
+    done."""
     facts = random.sample(RALEIGH_FACTS, len(RALEIGH_FACTS))
     i = 0
     while not stop_event.is_set():
         with placeholder.container():
             st.info(header_text)
+            if progress is not None:
+                st.progress(progress)
             st.caption(f"🌳🐿️ {facts[i % len(facts)]}")
         i += 1
         stop_event.wait(5.0)
@@ -527,13 +537,16 @@ def _scroll_facts(placeholder, header_text, stop_event):
 
 class scrolling_loader:
     """Context manager: shows `header_text` in `placeholder` with a Raleigh
-    fact that scrolls every ~2 seconds for as long as the block runs."""
+    fact that scrolls every ~2 seconds for as long as the block runs.
+    Optionally shows a progress bar (see _scroll_facts)."""
 
-    def __init__(self, placeholder, header_text):
+    def __init__(self, placeholder, header_text, progress=None):
         self.placeholder = placeholder
         self.header_text = header_text
         self.stop_event = threading.Event()
-        self.thread = threading.Thread(target=_scroll_facts, args=(placeholder, header_text, self.stop_event))
+        self.thread = threading.Thread(
+            target=_scroll_facts, args=(placeholder, header_text, self.stop_event, progress)
+        )
         add_script_run_ctx(self.thread)
 
     def __enter__(self):
@@ -689,6 +702,13 @@ def render_property():
 
 
 def render_csv_stage(profile):
+    name_col, brokerage_col = st.columns(2)
+    with name_col:
+        st.text_input("Prepared by", key="preparer_name")
+    with brokerage_col:
+        st.text_input("Brokerage", key="preparer_brokerage")
+    st.text_input("Contact info (optional — shown on the report if filled in)", key="preparer_contact")
+
     st.subheader("Step 1 of 3: MLS comp data")
     st.caption(
         "Upload a CSV export covering the last 2 years — active, pending, active under contract, "
@@ -764,7 +784,7 @@ def render_reports_stage():
                 tmp.write(f.getvalue())
                 tmp_path = tmp.name
             try:
-                with scrolling_loader(loading, header):
+                with scrolling_loader(loading, header, progress=(i + 1) / len(unprocessed)):
                     data = extract_json(client, tmp_path, ACTIVITY_PROMPT)
                 st.session_state["sources"].append({"source": f.name, "data": data})
             except Exception as e:
@@ -1090,7 +1110,12 @@ def render_review_stage(slug, profile, history):
         pdf_feedback = all_feedback_list(st.session_state["known_feedback"]) if st.session_state["known_feedback"] else None
         st.download_button(
             "Download PDF report",
-            data=build_pdf(profile, merged, "", pdf_calc_comps, pdf_solds_window_months, pdf_feedback),
+            data=build_pdf(
+                profile, merged, "", pdf_calc_comps, pdf_solds_window_months, pdf_feedback,
+                st.session_state.get("preparer_name"),
+                st.session_state.get("preparer_brokerage"),
+                st.session_state.get("preparer_contact"),
+            ),
             file_name=f"{slug}-report-{date.today().isoformat()}.pdf",
             mime="application/pdf",
         )
@@ -1107,3 +1132,5 @@ elif view == "new_property":
     render_new_property()
 elif view == "property":
     render_property()
+elif view == "terms":
+    render_terms()

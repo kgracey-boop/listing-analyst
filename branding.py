@@ -1,15 +1,35 @@
 """
 Brand settings for the app. Kept in one place so a future version can
-swap these per agent instead of hardcoding one brokerage.
+swap these per agent instead of hardcoding one owner.
 
 Palette/fonts pulled from graceyrealestate.com (Kevin's own site): navy +
 gold, Belleza for display headings, Work Sans for body text.
 """
+import base64
+import html as html_lib
+import os
+
 import streamlit as st
+
+_ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+
+
+def _load_base64(filename):
+    path = os.path.join(_ASSETS_DIR, filename)
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("ascii")
+
+
+# Loaded once at import time — the header logo swaps in for the plain
+# "RootedReports" text lockup on brand-identity pages (the menu and the
+# passcode gate), not on pages whose title is page-specific content
+# (a property address, "Terms of Use") where the logo would compete with it.
+LOGO_HEADER_B64 = _load_base64("logo-header.png")
 
 BRAND = {
     "agent_name": "Kevin Gracey",
-    "brokerage": "Coldwell Banker Advantage",
     "navy": "#002244",
     "gold": "#F4B400",
     "slate": "#444444",
@@ -43,6 +63,11 @@ def inject_css():
             border-radius: 0;
             border-bottom: 3px solid {BRAND['gold']};
             margin-bottom: 1.5rem;
+        }}
+        .brand-header-logo {{
+            height: 88px;
+            display: block;
+            margin-bottom: 0.5rem;
         }}
         .brand-header h1 {{
             color: white;
@@ -132,12 +157,33 @@ def inject_css():
     )
 
 
-def render_header(subtitle: str = "RootedReports"):
+def render_header(subtitle: str = "RootedReports", prepared_by: str = None):
+    # Falls back to the fixed brand owner (BRAND['agent_name']) only if the
+    # user hasn't set their own name yet — "prepared by" is meant to reflect
+    # whoever is actually using the tool right now, distinct from who legally
+    # owns the software (that's fixed, and lives in the Terms of Use text).
+    # Callers who need the fixed owner unconditionally (e.g. the Terms page)
+    # can pass prepared_by explicitly — that also suppresses brokerage/contact,
+    # since those are this session's user-entered details, not the owner's.
+    fixed_owner = prepared_by is not None
+    name = html_lib.escape(prepared_by or st.session_state.get("preparer_name") or BRAND["agent_name"])
+    brokerage = None if fixed_owner else st.session_state.get("preparer_brokerage")
+    contact = None if fixed_owner else st.session_state.get("preparer_contact")
+
+    subtitle_line = f"{html_lib.escape(brokerage)} &middot; prepared by {name}" if brokerage else f"Prepared by {name}"
+    contact_html = f'<p class="brand-header-contact">{html_lib.escape(contact)}</p>' if contact else ""
+
+    if subtitle == "RootedReports" and LOGO_HEADER_B64:
+        title_html = f'<img class="brand-header-logo" src="data:image/png;base64,{LOGO_HEADER_B64}" alt="Rooted Reports">'
+    else:
+        title_html = f"<h1>{subtitle}</h1>"
+
     st.markdown(
         f"""
         <div class="brand-header">
-            <h1>{subtitle}</h1>
-            <p>{BRAND['brokerage']} &middot; prepared by {BRAND['agent_name']}</p>
+            {title_html}
+            <p>{subtitle_line}</p>
+            {contact_html}
         </div>
         """,
         unsafe_allow_html=True,
@@ -145,11 +191,29 @@ def render_header(subtitle: str = "RootedReports"):
 
 
 def render_footer():
+    name = html_lib.escape(st.session_state.get("preparer_name") or BRAND["agent_name"])
+    brokerage = st.session_state.get("preparer_brokerage")
+    footer_line = f"{name} &middot; {html_lib.escape(brokerage)}" if brokerage else name
     st.markdown(
         f"""
         <div class="brand-footer">
-            {BRAND['agent_name']} &middot; {BRAND['brokerage']}
+            {footer_line}
         </div>
         """,
         unsafe_allow_html=True,
     )
+    _, mid, _ = st.columns([3, 1, 3])
+    with mid:
+        current_view = st.session_state.get("view")
+        if current_view != "terms" and st.button("Terms", key=f"terms-link-{current_view}", use_container_width=True):
+            # Parks where we came from rather than calling app.py's goto() —
+            # a detour to read the Terms shouldn't reset in-progress work
+            # (uploaded CSVs, extracted comps, etc.) the way navigating to a
+            # different property or starting fresh should.
+            st.session_state["terms_return"] = {
+                "view": current_view,
+                "slug": st.session_state.get("slug"),
+                "stage": st.session_state.get("stage", "csv"),
+            }
+            st.session_state["view"] = "terms"
+            st.rerun()
