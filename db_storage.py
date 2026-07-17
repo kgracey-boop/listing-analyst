@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS history (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE properties ADD COLUMN IF NOT EXISTS known_comps JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE properties ADD COLUMN IF NOT EXISTS known_feedback JSONB NOT NULL DEFAULT '{}'::jsonb;
 """
 
 
@@ -99,3 +100,14 @@ def load_known_comps(slug: str) -> dict:
 def save_known_comps(slug: str, known_comps: dict):
     with _connect() as conn:
         conn.execute("UPDATE properties SET known_comps = %s WHERE slug = %s", (Jsonb(known_comps), slug))
+
+
+def load_known_feedback(slug: str) -> dict:
+    with _connect() as conn:
+        row = conn.execute("SELECT known_feedback FROM properties WHERE slug = %s", (slug,)).fetchone()
+    return row[0] if row and row[0] else {}
+
+
+def save_known_feedback(slug: str, known_feedback: dict):
+    with _connect() as conn:
+        conn.execute("UPDATE properties SET known_feedback = %s WHERE slug = %s", (Jsonb(known_feedback), slug))

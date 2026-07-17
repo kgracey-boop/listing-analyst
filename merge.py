@@ -130,7 +130,9 @@ def merge_extractions(sources: list) -> dict:
                     if value and not existing.get(field):
                         existing[field] = value
             else:
-                comps_by_key[key] = dict(comp)
+                entry = dict(comp)
+                entry["source"] = s["source"]
+                comps_by_key[key] = entry
                 comp_order.append(key)
     merged["comparable_listings"] = backfill_comp_fields([comps_by_key[k] for k in comp_order])
 

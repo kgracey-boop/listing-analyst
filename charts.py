@@ -17,8 +17,6 @@ slots 1-3, kept in their validated fixed order rather than reordered.
 import altair as alt
 import pandas as pd
 
-from branding import BRAND
-
 NEUTRAL_GRAY = "#C3C2B7"
 
 # The brand's UI gold (BRAND["gold"]) is tuned for text/buttons on a navy
@@ -35,6 +33,13 @@ STATUS_COLORS = {
     "Pending": "#1baf7a",
     "Closed": "#eda100",
 }
+
+# The subject's own marker on the price-vs-DOM scatter — validated slot 5
+# (violet) from the dataviz skill's categorical palette. Deliberately not
+# reused from blue/aqua/yellow/gold already in play elsewhere on this chart:
+# it's cool-toned against an otherwise warm palette, and carries no
+# pre-existing good/bad connotation the way green or red might.
+SUBJECT_COLOR = "#4a3aa7"
 
 
 def price_band_chart(price_bands: list, subject_band: str):
@@ -110,19 +115,19 @@ def price_position_chart(comparable_listings: list, subject_price, subject_dom=N
 
     if subject_price:
         hline = alt.Chart(pd.DataFrame({"price": [subject_price]})).mark_rule(
-            color=BRAND["navy"], strokeDash=[4, 4], size=2
+            color=SUBJECT_COLOR, strokeDash=[4, 4], size=2
         ).encode(y="price:Q")
         layers.append(hline)
 
     if subject_dom is not None:
         vline = alt.Chart(pd.DataFrame({"days_on_market": [subject_dom]})).mark_rule(
-            color=BRAND["navy"], strokeDash=[4, 4], size=2
+            color=SUBJECT_COLOR, strokeDash=[4, 4], size=2
         ).encode(x="days_on_market:Q")
         layers.append(vline)
 
     if subject_price and subject_dom is not None:
         marker_df = pd.DataFrame({"days_on_market": [subject_dom], "price": [subject_price], "label": ["Your listing"]})
-        text = alt.Chart(marker_df).mark_text(color=BRAND["navy"], dy=-14, fontWeight="bold").encode(
+        text = alt.Chart(marker_df).mark_text(color=SUBJECT_COLOR, dy=-14, fontWeight="bold").encode(
             x="days_on_market:Q", y="price:Q", text="label:N"
         )
         layers.append(text)

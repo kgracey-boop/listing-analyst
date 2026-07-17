@@ -43,6 +43,16 @@ data. If a document only gives market-wide/price-band showing counts and
 never states the subject's own showing count, leave `showings.total` and
 `showings.last_30_days` as null — do not substitute the band total.
 
+Note on also_viewed / also_saved: some reports (e.g. Doorify) include a table
+specifically labeled something like "People who viewed this listing also
+viewed" or "People who saved this listing also saved" — a curated list based
+on real buyer behavior, not just a general list of competing listings. Only
+set `also_viewed: true` for a comp that appears in a table with that specific
+kind of label, and only set `also_saved: true` for one from a "...also saved"
+table. Every other comp (from a general active/pending/closed sheet, a CSV,
+etc.) gets `also_viewed: false` and `also_saved: false` — never infer either
+from context, only from an explicitly labeled table like that.
+
 {
   "address": string or null,
   "list_price": number or null,
@@ -68,7 +78,9 @@ never states the subject's own showing count, leave `showings.total` and
       "property_type": string or null,
       "subdivision": string or null,
       "city": string or null,
-      "postal_code": string or null
+      "postal_code": string or null,
+      "also_viewed": true or false,
+      "also_saved": true or false
     }
   ],
   "price_band_analysis": {

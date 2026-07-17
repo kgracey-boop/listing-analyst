@@ -117,6 +117,8 @@ def parse_mls_csv(file_obj) -> dict:
             "postal_code": (row.get(column_map.get("postal_code"), "") or "").strip() or None,
         }
         if any(v is not None for v in listing.values()):
+            listing["also_viewed"] = False
+            listing["also_saved"] = False
             listings.append(listing)
 
     unmapped = [f for f in REQUIRED_FOR_ABSORPTION if f not in column_map]

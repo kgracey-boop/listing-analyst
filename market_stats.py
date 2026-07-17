@@ -349,6 +349,30 @@ def comp_price_reduction_stats(comparable_listings: list, as_of=None) -> dict:
     return result
 
 
+def filter_recent_closed(comparable_listings: list, months: int = None, as_of=None) -> list:
+    """Keeps active/pending comps as-is; filters closed comps to those that
+    closed within the trailing `months` window. months=None means no
+    filtering (all closed comps kept). A closed comp with an unparseable/
+    missing close_date is dropped rather than assumed recent — used to keep
+    the price-vs-days-on-market chart focused on comps that are actually
+    verifiably recent, not a multi-year CSV pull's full sold history."""
+    if months is None:
+        return list(comparable_listings)
+
+    as_of = as_of or datetime.today()
+    cutoff = as_of - timedelta(days=months * 30)
+
+    kept = []
+    for c in comparable_listings:
+        if c.get("status") != "closed":
+            kept.append(c)
+            continue
+        close_date = try_parse_date(c.get("close_date"))
+        if close_date is not None and close_date >= cutoff:
+            kept.append(c)
+    return kept
+
+
 def match_price_band(list_price, bands: list):
     """
     Given a list price and a list of {"band": "$310,000 - $319,999", ...},

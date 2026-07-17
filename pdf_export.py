@@ -13,6 +13,7 @@ from fpdf.fonts import FontFace
 
 from branding import BRAND
 from charts import price_band_chart, price_position_chart
+from comps_store import also_saved_comps, also_viewed_comps
 from market_stats import (
     MIN_MONTHS_WITH_DATA,
     bucket_property_type,
@@ -21,6 +22,7 @@ from market_stats import (
     comp_price_reduction_stats,
     data_scope_summary,
     dom_benchmark,
+    filter_recent_closed,
     match_price_band,
     median_comp_price_per_sqft,
     price_per_sqft,
@@ -94,17 +96,59 @@ def _data_confidence_warning(row_count: int, stats: dict) -> str:
 
 
 class Report(FPDF):
-    def __init__(self, navy, slate):
+    def __init__(self, navy, slate, title_text="RootedReports"):
         super().__init__(unit="mm", format="Letter")
         self.navy = navy
         self.slate = slate
+        self.title_text = title_text
         self.set_auto_page_break(auto=True, margin=20)
 
-    def section_title(self, text):
+    def header(self):
+        """Called automatically by fpdf2 on every page (including ones
+        created by an automatic page break) — page 1 gets the full hero
+        banner, every later page gets a slim running version so a printed/
+        forwarded page always shows whose report it is."""
+        if self.page_no() == 1:
+            self.set_fill_color(*self.navy)
+            self.rect(0, 0, self.w, 30, style="F")
+            self.set_fill_color(255, 255, 255)
+            self.set_xy(10, 7)
+            self.set_text_color(255, 255, 255)
+            self.set_font("Helvetica", "B", 18)
+            self.cell(0, 9, self.title_text, new_x="LMARGIN", new_y="NEXT")
+            self.set_x(10)
+            self.set_font("Helvetica", "", 11)
+            self.cell(0, 6, f"{BRAND['brokerage']} · prepared by {BRAND['agent_name']}", new_x="LMARGIN", new_y="NEXT")
+            self.set_y(38)
+        else:
+            self.set_fill_color(*self.navy)
+            self.rect(0, 0, self.w, 14, style="F")
+            self.set_fill_color(255, 255, 255)
+            self.set_xy(10, 4)
+            self.set_text_color(255, 255, 255)
+            self.set_font("Helvetica", "B", 11)
+            self.cell(0, 6, self.title_text, new_x="LMARGIN", new_y="NEXT")
+            self.set_y(20)
+        self.set_text_color(0, 0, 0)
+
+    def footer(self):
+        """Called automatically by fpdf2 at the bottom of every page."""
+        self.set_y(-15)
+        self.set_font("Helvetica", "I", 8)
+        self.set_text_color(*self.slate)
+        self.cell(0, 10, f"{BRAND['agent_name']} · {BRAND['brokerage']}  |  Page {self.page_no()}", align="C")
+
+    def section_title(self, text, min_content_space=25):
+        """Page-breaks before the title itself, not just before whatever
+        comes after it — otherwise a title can end up stranded alone at the
+        bottom of a page while its content (a chart, a table) gets pushed
+        to the next one, leaving a dead patch of whitespace."""
+        if self.get_y() + 8 + min_content_space > self.page_break_trigger:
+            self.add_page()
         self.ln(3)
         self.set_font("Helvetica", "B", 13)
         self.set_text_color(*self.navy)
-        self.cell(0, 8, text, ln=1)
+        self.cell(0, 8, text, new_x="LMARGIN", new_y="NEXT")
         self.set_font("Helvetica", "", 11)
         self.set_text_color(0, 0, 0)
 
@@ -166,26 +210,45 @@ class Report(FPDF):
         self.ln(3)
 
 
-def build_pdf(profile: dict, merged: dict, commentary: str, calc_comps: list = None) -> bytes:
+def _render_viewer_overlap_table(pdf, comps, since_field, title):
+    if not comps:
+        return
+    pdf.section_title(title)
+    rows = []
+    for c in comps[:MAX_COMP_ROWS]:
+        price = c.get("sold_price") if c.get("status") == "closed" else c.get("list_price")
+        url = _build_listing_url(c.get("link_or_reference")) if c.get("status") == "active" else None
+        rows.append([
+            c.get("address") or "Unknown address",
+            (c.get("status") or "-").title(),
+            _fmt_money(price) or "-",
+            c.get(since_field) or "-",
+            "View" if url else "-",
+            url,
+        ])
+    pdf.comp_table(
+        ["Address", "Status", "Price", "First Flagged", "Link"],
+        rows,
+        col_widths=(5, 2, 2, 2, 2),
+        link_col=4,
+    )
+    if len(comps) > MAX_COMP_ROWS:
+        pdf.caption_line(f"Showing the {MAX_COMP_ROWS} most recently flagged, of {len(comps)} total.")
+
+
+def build_pdf(
+    profile: dict,
+    merged: dict,
+    commentary: str,
+    calc_comps: list = None,
+    solds_window_months: int = 3,
+    known_feedback: list = None,
+) -> bytes:
     navy = _hex_to_rgb(BRAND["navy"])
     slate = _hex_to_rgb(BRAND["slate"])
 
-    pdf = Report(navy, slate)
+    pdf = Report(navy, slate, title_text=profile.get("address") or "RootedReports")
     pdf.add_page()
-
-    pdf.set_fill_color(*navy)
-    pdf.rect(0, 0, pdf.w, 30, style="F")
-    pdf.set_fill_color(255, 255, 255)
-    pdf.set_xy(10, 7)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 9, profile.get("address") or "RootedReports", ln=1)
-    pdf.set_x(10)
-    pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 6, f"{BRAND['brokerage']} · prepared by {BRAND['agent_name']}", ln=1)
-
-    pdf.set_xy(10, 38)
-    pdf.set_text_color(*navy)
 
     # ---------------------------------------------------------- Key Numbers
     pdf.section_title("Key Numbers")
@@ -325,7 +388,8 @@ def build_pdf(profile: dict, merged: dict, commentary: str, calc_comps: list = N
             pdf.ln(1)
             pdf.caption_line("Data scope: " + " · ".join(scope_parts))
 
-        pdf.add_chart(price_position_chart(calc_comps, merged.get("list_price"), merged.get("days_on_market")))
+        chart_comps = filter_recent_closed(calc_comps, months=solds_window_months)
+        pdf.add_chart(price_position_chart(chart_comps, merged.get("list_price"), merged.get("days_on_market")))
 
         # ---------------------------------------- Active listings (with links)
         active_comps = [c for c in calc_comps if c.get("status") == "active" and c.get("list_price")]
@@ -375,6 +439,14 @@ def build_pdf(profile: dict, merged: dict, commentary: str, calc_comps: list = N
             if len(closed_comps) > MAX_COMP_ROWS:
                 pdf.caption_line(f"Showing the {MAX_COMP_ROWS} most recent closings, of {len(closed_comps)} closed comps total.")
 
+        # -------------------------------------------------- Viewer overlap
+        _render_viewer_overlap_table(
+            pdf, also_viewed_comps(calc_comps), "also_viewed_since", "People Who Viewed Your Listing Also Viewed"
+        )
+        _render_viewer_overlap_table(
+            pdf, also_saved_comps(calc_comps), "also_saved_since", "People Who Saved Your Listing Also Saved"
+        )
+
     # ------------------------------------------------------------ Price bands
     if merged.get("price_bands"):
         pdf.section_title("Showings by Price Band")
@@ -385,9 +457,10 @@ def build_pdf(profile: dict, merged: dict, commentary: str, calc_comps: list = N
             pdf.caption_line(f"{b['band']}: {b['showing_count']} showings{marker}")
 
     # ------------------------------------------------------------- Feedback
-    if merged.get("feedback"):
+    feedback_entries = known_feedback if known_feedback is not None else (merged.get("feedback") or [])
+    if feedback_entries:
         pdf.section_title("Buyer Feedback")
-        rows = [[f.get("date") or "Date unknown", f.get("quote") or ""] for f in merged["feedback"]]
+        rows = [[f.get("date") or "Date unknown", f.get("quote") or ""] for f in feedback_entries]
         pdf.comp_table(["Date", "Feedback"], rows, col_widths=(2, 8))
 
     # ---------------------------------------------------------- Online traffic
@@ -400,10 +473,5 @@ def build_pdf(profile: dict, merged: dict, commentary: str, calc_comps: list = N
     if commentary:
         pdf.section_title("Agent Commentary")
         pdf.body_line(commentary)
-
-    pdf.ln(6)
-    pdf.set_font("Helvetica", "I", 9)
-    pdf.set_text_color(*slate)
-    pdf.cell(0, 10, f"{BRAND['agent_name']} · {BRAND['brokerage']}", align="C", new_x="LMARGIN", new_y="NEXT")
 
     return bytes(pdf.output())

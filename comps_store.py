@@ -13,7 +13,17 @@ from datetime import date
 from merge import address_key
 
 TIME_VARYING_FIELDS = ["status", "list_price", "original_list_price", "sold_price", "days_on_market", "close_date"]
-STABLE_FIELDS = ["address", "property_type", "subdivision", "city", "postal_code", "link_or_reference"]
+STABLE_FIELDS = [
+    "address", "property_type", "subdivision", "city", "postal_code", "link_or_reference",
+    "source", "also_viewed", "also_saved",
+]
+
+# Booleans that, once flagged true, get a companion "when did we first learn
+# this" date stamped alongside them — set once, on the first report where the
+# flag is true, and never touched again (even if a later report re-confirms
+# or omits it). Distinct from first_seen_date/last_seen_date below, which
+# track the comp overall, not this specific flag.
+FIRST_FLAGGED_DATE_FIELDS = [("also_viewed", "also_viewed_since"), ("also_saved", "also_saved_since")]
 
 
 def update_known_comps(known_comps: dict, new_comps: list, today: str = None) -> dict:
@@ -39,6 +49,9 @@ def update_known_comps(known_comps: dict, new_comps: list, today: str = None) ->
             for field in STABLE_FIELDS:
                 if not existing.get(field) and comp.get(field):
                     existing[field] = comp[field]
+            for flag_field, since_field in FIRST_FLAGGED_DATE_FIELDS:
+                if comp.get(flag_field) and not existing.get(since_field):
+                    existing[since_field] = today
             existing["last_seen_date"] = today
             # "excluded" / "excluded_reason" deliberately left untouched —
             # that's an agent judgment call, not something re-extraction
@@ -49,6 +62,9 @@ def update_known_comps(known_comps: dict, new_comps: list, today: str = None) ->
             entry["excluded_reason"] = None
             entry["first_seen_date"] = today
             entry["last_seen_date"] = today
+            for flag_field, since_field in FIRST_FLAGGED_DATE_FIELDS:
+                if entry.get(flag_field):
+                    entry[since_field] = today
             updated[key] = entry
 
     return updated
@@ -66,3 +82,19 @@ def active_for_calculation(known_comps: dict) -> list:
     stats, property-type breakdown, data scope, etc. Excluded comps still
     show up in the table, just don't count toward the math."""
     return [c for c in known_comps.values() if not c.get("excluded")]
+
+
+def also_viewed_comps(comparable_listings: list) -> list:
+    """Comps flagged from a Doorify-style "people who viewed this listing
+    also viewed" table — including excluded ones, same "never hide
+    data-quality info" rule the rest of the comps tables follow. Sorted by
+    when the overlap was first flagged, most recent first."""
+    comps = [c for c in comparable_listings if c.get("also_viewed")]
+    return sorted(comps, key=lambda c: c.get("also_viewed_since") or "", reverse=True)
+
+
+def also_saved_comps(comparable_listings: list) -> list:
+    """Same as also_viewed_comps, for the "people who saved this listing
+    also saved" table."""
+    comps = [c for c in comparable_listings if c.get("also_saved")]
+    return sorted(comps, key=lambda c: c.get("also_saved_since") or "", reverse=True)

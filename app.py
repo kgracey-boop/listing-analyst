@@ -20,8 +20,9 @@ except Exception:
 import db_storage as storage
 from branding import BRAND, inject_css, render_footer, render_header
 from charts import price_band_chart, price_position_chart
-from comps_store import active_for_calculation, all_comps_list, update_known_comps
+from comps_store import active_for_calculation, all_comps_list, also_saved_comps, also_viewed_comps, update_known_comps
 from csv_parser import parse_mls_csv
+from feedback_store import all_feedback_list, apply_feedback_edits, update_known_feedback
 from gemini_io import ACTIVITY_PROMPT, PROFILE_PROMPT, extract_json, get_client
 from market_stats import (
     MIN_MONTHS_WITH_DATA,
@@ -31,6 +32,7 @@ from market_stats import (
     compute_absorption,
     data_scope_summary,
     dom_benchmark,
+    filter_recent_closed,
     match_price_band,
     median_comp_price_per_sqft,
     price_per_sqft,
@@ -228,6 +230,9 @@ COMP_STATUS_GROUPS = [
     ("other", "Other"),
 ]
 
+SOLDS_WINDOW_OPTIONS = {"Last 3 months": 3, "Last 6 months": 6, "Last 12 months": 12, "All time": None}
+DEFAULT_SOLDS_WINDOW = "Last 3 months"
+
 
 def comps_by_status(comparable_listings: list) -> dict:
     """Splits comps into Active / Pending / Closed / Failed (expired or
@@ -265,7 +270,7 @@ def render_comps_tables(comparable_listings: list):
 
 COMP_DISPLAY_COLUMNS = [
     "address", "status", "list_price", "original_list_price", "sold_price",
-    "square_feet", "days_on_market", "close_date", "property_type",
+    "square_feet", "days_on_market", "close_date", "property_type", "source",
     "excluded", "excluded_reason",
 ]
 
@@ -275,6 +280,33 @@ def _project_comp_for_display(row: dict, include_link: bool) -> dict:
     if include_link:
         projected["listing_url"] = build_listing_url(row.get("link_or_reference")) if row.get("status") == "active" else None
     return projected
+
+
+def _project_viewer_overlap_comp(row: dict, since_field: str) -> dict:
+    """For the "people who viewed/saved your listing also viewed/saved"
+    tables — a curated subset of fields plus the date the overlap was first
+    flagged, and a link for active comps."""
+    return {
+        "address": row.get("address"),
+        "status": row.get("status"),
+        "list_price": row.get("list_price"),
+        "sold_price": row.get("sold_price"),
+        since_field: row.get(since_field),
+        "listing_url": build_listing_url(row.get("link_or_reference")) if row.get("status") == "active" else None,
+    }
+
+
+def render_viewer_overlap_table(comps: list, since_field: str, label: str):
+    st.write(f"**{label}** ({len(comps)}):")
+    st.dataframe(
+        [_project_viewer_overlap_comp(c, since_field) for c in comps],
+        use_container_width=True,
+        column_config={
+            since_field: st.column_config.TextColumn("First flagged"),
+            "listing_url": st.column_config.LinkColumn("Listing", display_text="View"),
+        },
+        hide_index=True,
+    )
 
 
 def render_comps_editor(known_comps: dict) -> dict:
@@ -373,6 +405,7 @@ DEFAULTS = {
     "csv_source_name": None,
     "quiet_errors": [],
     "known_comps": None,
+    "known_feedback": None,
 }
 for key, value in DEFAULTS.items():
     if key not in st.session_state:
@@ -389,6 +422,7 @@ def goto(view, slug=None, stage="csv"):
     st.session_state["csv_source_name"] = None
     st.session_state["quiet_errors"] = []
     st.session_state["known_comps"] = None
+    st.session_state["known_feedback"] = None
 
 
 def _scroll_facts(placeholder, header_text, stop_event):
@@ -689,6 +723,13 @@ def render_review_stage(slug, profile, history):
             st.session_state["known_comps"], merged["comparable_listings"]
         )
 
+    if st.session_state["known_feedback"] is None:
+        st.session_state["known_feedback"] = storage.load_known_feedback(slug)
+    if merged["feedback"]:
+        st.session_state["known_feedback"] = update_known_feedback(
+            st.session_state["known_feedback"], merged["feedback"]
+        )
+
     with st.expander("Basic facts", expanded=True):
         merged["list_price"] = st.number_input("List price", value=float(merged.get("list_price") or 0), step=1000.0)
         merged["original_list_price"] = st.number_input(
@@ -775,22 +816,30 @@ def render_review_stage(slug, profile, history):
         merged["showings"]["last_30_days"] = st.number_input(
             "Showings (last 30 days)", value=int(merged["showings"].get("last_30_days") or 0), step=1
         )
-        st.write("Feedback — verbatim quotes, not summarized themes:")
-        feedback_df = pd.DataFrame(merged["feedback"], columns=["date", "quote", "source"])
+        st.write("Feedback — verbatim quotes, not summarized themes. Check Follow-up to flag a buyer worth watching; it persists across future visits.")
+        feedback_rows = all_feedback_list(st.session_state["known_feedback"])
+        feedback_df = pd.DataFrame(
+            feedback_rows, columns=["date", "quote", "source", "following_up", "follow_up_note"]
+        )
         edited_feedback = st.data_editor(
             feedback_df,
             column_config={
                 "date": st.column_config.TextColumn("Date"),
                 "quote": st.column_config.TextColumn("Quote", width="large"),
                 "source": st.column_config.TextColumn("Source", disabled=True),
+                "following_up": st.column_config.CheckboxColumn("Follow-up"),
+                "follow_up_note": st.column_config.TextColumn("Note"),
             },
-            column_order=["date", "quote", "source"],
+            column_order=["date", "quote", "source", "following_up", "follow_up_note"],
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
             key="feedback_editor",
         )
-        merged["feedback"] = edited_feedback.where(edited_feedback.notna(), None).to_dict("records")
+        edited_feedback_rows = edited_feedback.where(edited_feedback.notna(), None).to_dict("records")
+        st.session_state["known_feedback"] = apply_feedback_edits(
+            st.session_state["known_feedback"], edited_feedback_rows
+        )
 
     with st.expander("Online traffic"):
         if merged["traffic_by_source"]:
@@ -879,11 +928,25 @@ def render_review_stage(slug, profile, history):
                 render_data_scope(calc_comps, stats)
 
                 st.write("**Sample chart** — price vs. days on market for active/pending/closed comps *(prototype)*:")
-                position_chart = price_position_chart(calc_comps, merged.get("list_price"), merged.get("days_on_market"))
+                solds_window_label = st.selectbox(
+                    "Solds shown in chart", list(SOLDS_WINDOW_OPTIONS.keys()),
+                    index=list(SOLDS_WINDOW_OPTIONS.keys()).index(DEFAULT_SOLDS_WINDOW),
+                    key="solds_window_label",
+                )
+                comps_for_chart = filter_recent_closed(calc_comps, months=SOLDS_WINDOW_OPTIONS[solds_window_label])
+                position_chart = price_position_chart(comps_for_chart, merged.get("list_price"), merged.get("days_on_market"))
                 if position_chart is not None:
                     st.altair_chart(position_chart, use_container_width=True)
                 else:
                     st.caption("Not enough comps with both a price and days-on-market to plot yet.")
+
+                viewed = also_viewed_comps(calc_comps)
+                if viewed:
+                    render_viewer_overlap_table(viewed, "also_viewed_since", "People who viewed your listing also viewed")
+
+                saved = also_saved_comps(calc_comps)
+                if saved:
+                    render_viewer_overlap_table(saved, "also_saved_since", "People who saved your listing also saved")
 
             if merged["price_bands"]:
                 band = match_price_band(merged.get("list_price"), merged["price_bands"])
@@ -921,12 +984,16 @@ def render_review_stage(slug, profile, history):
             }
             storage.save_snapshot(slug, snapshot)
             storage.save_known_comps(slug, st.session_state["known_comps"])
+            storage.save_known_feedback(slug, st.session_state["known_feedback"])
             st.success("Saved. Next report for this property will compare against this one.")
     with col2:
         pdf_calc_comps = active_for_calculation(st.session_state["known_comps"]) if st.session_state["known_comps"] else None
+        pdf_solds_window_label = st.session_state.get("solds_window_label", DEFAULT_SOLDS_WINDOW)
+        pdf_solds_window_months = SOLDS_WINDOW_OPTIONS.get(pdf_solds_window_label, SOLDS_WINDOW_OPTIONS[DEFAULT_SOLDS_WINDOW])
+        pdf_feedback = all_feedback_list(st.session_state["known_feedback"]) if st.session_state["known_feedback"] else None
         st.download_button(
             "Download PDF report",
-            data=build_pdf(profile, merged, "", pdf_calc_comps),
+            data=build_pdf(profile, merged, "", pdf_calc_comps, pdf_solds_window_months, pdf_feedback),
             file_name=f"{slug}-report-{date.today().isoformat()}.pdf",
             mime="application/pdf",
         )
