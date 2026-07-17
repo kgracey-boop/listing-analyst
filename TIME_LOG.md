@@ -25,6 +25,28 @@ short summary of what actually got done.
   stuck-on-Step-2 navigation bug)
 - Deployed to Streamlit Cloud, troubleshot a stale-deploy issue
 
+## 2026-07-17 — ~4 hours
+
+- Also-viewed/also-saved comp tracking, a solds date-filter on the scattergram,
+  and a permanent feedback follow-up flag (running store, survives re-extraction)
+- Randomized the squirrel-facts rotation (was always showing the same first
+  couple of facts on quick extractions)
+- Added a market-rate $/sqft reference line to the scattergram and subdivision
+  field extraction from MLS cut sheets
+- Long design pass converting number-heavy sections into charts: cut a
+  redundant price-band text list, added a closed-median DOM reference line,
+  turned the price-drop rate into an actual trend chart, and turned the
+  property-type absorption breakdown into a real bar chart
+- Parsed New Construction YN, Listing Contract Date, and Purchase Contract
+  Date from the CSV (previously only Close Date was read) and built a
+  contract-date-based months-of-supply calc for New Construction, since its
+  close date is stretched out by real build time
+- Built a subdivision-vs-rest-of-zip absorption comparison, and a weekly
+  contract-volume chart filtered to the subject's own property type
+- Verified everything against a real, large zip-wide CSV pull (2,221 rows,
+  163 subdivisions, 501 genuine New Construction rows) — confirmed a real
+  50-day vs. 27-day list-to-contract gap between New Construction and resale
+
 ## 2026-07-16 (evening session) — ~3 hours
 
 - Built sample charts (price-band highlight, price-vs-days-on-market by
