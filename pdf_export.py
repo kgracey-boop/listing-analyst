@@ -1,15 +1,19 @@
 """
 Builds a branded PDF for the seller: key numbers, price history, market
 comparison stats, and the same sample charts shown on the review screen,
-plus the agent's (edited) commentary. Uses fpdf2's built-in fonts, not the
-custom Archivo/Roboto webfonts used on the Streamlit page.
+plus the agent's (edited) commentary.
+
+Rendered as real HTML/CSS through WeasyPrint rather than drawn with fpdf2's
+manual coordinate API — the same brand fonts/palette as the rest of the app
+(Belleza/Work Sans, navy/gold), and charts embedded as crisp inline SVG
+instead of rasterized images. WeasyPrint needs Pango/Cairo installed at the
+system level (see packages.txt for the Streamlit Cloud apt packages) —
+that's the one tradeoff for the richer visual result.
 """
-import io
-import re
+import html as html_lib
 
 import vl_convert as vlc
-from fpdf import FPDF
-from fpdf.fonts import FontFace
+from weasyprint import HTML as WeasyHTML
 
 from branding import BRAND
 from charts import (
@@ -43,28 +47,30 @@ from market_stats import (
 
 MIN_TOTAL_COMPS = 10
 MIN_TRAILING_SALES = 6
-
-PAGE_MARGIN = 10
-
 MAX_COMP_ROWS = 8
+
+
+def _esc(value) -> str:
+    """HTML-escapes any dynamic value before it goes into the template —
+    most of this data comes from Gemini extraction or agent-typed text
+    (feedback quotes, commentary, addresses), never assume it's safe to
+    drop straight into markup."""
+    if value is None:
+        return ""
+    return html_lib.escape(str(value))
 
 
 def _build_listing_url(link_or_reference):
     """MLS# -> a search link on the agent's own site. Only meaningful for
-    active listings -- pending/closed ones won't show up in an active search.
-    (Same logic as app.py's build_listing_url, duplicated here to avoid a
-    circular import between pdf_export.py and app.py.)"""
+    active listings -- pending/closed ones won't show up in an active search."""
+    import re
+
     if not link_or_reference:
         return None
     match = re.search(r"\d+", str(link_or_reference))
     if not match:
         return None
     return BRAND["search_url_template"].format(mls_number=match.group())
-
-
-def _hex_to_rgb(hex_color: str):
-    hex_color = hex_color.lstrip("#")
-    return tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
 
 
 def _fmt_money(value) -> str:
@@ -97,134 +103,54 @@ def _data_confidence_warning(row_count: int, stats: dict) -> str:
     if row_count == 0:
         return None
     if row_count < MIN_TOTAL_COMPS:
-        return f"Only {row_count} comparable listings found - with this little data, the numbers below may not be reliable."
+        return f"Only {row_count} comparable listings found — with this little data, the numbers below may not be reliable."
     if stats["months_of_supply"] is not None and stats["closed_count_trailing"] < MIN_TRAILING_SALES:
         return (
-            f"Only {stats['closed_count_trailing']} sales in the trailing 12 months - "
+            f"Only {stats['closed_count_trailing']} sales in the trailing 12 months — "
             "the absorption rate may not be reliable with this few data points."
         )
     return None
 
 
-class Report(FPDF):
-    def __init__(self, navy, slate, title_text="RootedReports"):
-        super().__init__(unit="mm", format="Letter")
-        self.navy = navy
-        self.slate = slate
-        self.title_text = title_text
-        self.set_auto_page_break(auto=True, margin=20)
-
-    def header(self):
-        """Called automatically by fpdf2 on every page (including ones
-        created by an automatic page break) — page 1 gets the full hero
-        banner, every later page gets a slim running version so a printed/
-        forwarded page always shows whose report it is."""
-        if self.page_no() == 1:
-            self.set_fill_color(*self.navy)
-            self.rect(0, 0, self.w, 30, style="F")
-            self.set_fill_color(255, 255, 255)
-            self.set_xy(10, 7)
-            self.set_text_color(255, 255, 255)
-            self.set_font("Helvetica", "B", 18)
-            self.cell(0, 9, self.title_text, new_x="LMARGIN", new_y="NEXT")
-            self.set_x(10)
-            self.set_font("Helvetica", "", 11)
-            self.cell(0, 6, f"{BRAND['brokerage']} · prepared by {BRAND['agent_name']}", new_x="LMARGIN", new_y="NEXT")
-            self.set_y(38)
-        else:
-            self.set_fill_color(*self.navy)
-            self.rect(0, 0, self.w, 14, style="F")
-            self.set_fill_color(255, 255, 255)
-            self.set_xy(10, 4)
-            self.set_text_color(255, 255, 255)
-            self.set_font("Helvetica", "B", 11)
-            self.cell(0, 6, self.title_text, new_x="LMARGIN", new_y="NEXT")
-            self.set_y(20)
-        self.set_text_color(0, 0, 0)
-
-    def footer(self):
-        """Called automatically by fpdf2 at the bottom of every page."""
-        self.set_y(-15)
-        self.set_font("Helvetica", "I", 8)
-        self.set_text_color(*self.slate)
-        self.cell(0, 10, f"{BRAND['agent_name']} · {BRAND['brokerage']}  |  Page {self.page_no()}", align="C")
-
-    def section_title(self, text, min_content_space=25):
-        """Page-breaks before the title itself, not just before whatever
-        comes after it — otherwise a title can end up stranded alone at the
-        bottom of a page while its content (a chart, a table) gets pushed
-        to the next one, leaving a dead patch of whitespace."""
-        if self.get_y() + 8 + min_content_space > self.page_break_trigger:
-            self.add_page()
-        self.ln(3)
-        self.set_font("Helvetica", "B", 13)
-        self.set_text_color(*self.navy)
-        self.cell(0, 8, text, new_x="LMARGIN", new_y="NEXT")
-        self.set_font("Helvetica", "", 11)
-        self.set_text_color(0, 0, 0)
-
-    def body_line(self, text):
-        self.set_font("Helvetica", "", 11)
-        self.set_text_color(0, 0, 0)
-        self.multi_cell(0, 6, text, new_x="LMARGIN", new_y="NEXT")
-
-    def caption_line(self, text):
-        self.set_font("Helvetica", "", 10)
-        self.set_text_color(*self.slate)
-        self.multi_cell(0, 5, text, new_x="LMARGIN", new_y="NEXT")
-        self.set_text_color(0, 0, 0)
-
-    def comp_table(self, headers, rows, col_widths, link_col=None):
-        """A simple table of comp rows. If link_col is given, that column's
-        cell becomes a clickable link using the row's last element (the link
-        URL, not displayed as its own column)."""
-        self.set_font("Helvetica", "", 9)
-        self.set_text_color(0, 0, 0)
-        mist = _hex_to_rgb(BRAND["mist"])
-        headings_style = FontFace(emphasis="B", color=self.navy, fill_color=mist)
-        with self.table(
-            col_widths=col_widths, text_align="LEFT", width=190, line_height=5.5, headings_style=headings_style
-        ) as table:
-            header_row = table.row()
-            for h in headers:
-                header_row.cell(h)
-            for row in rows:
-                link = row[-1] if link_col is not None else None
-                values = row[:-1] if link_col is not None else row
-                table_row = table.row()
-                for i, value in enumerate(values):
-                    if link_col is not None and i == link_col:
-                        table_row.cell(str(value), link=link)
-                    else:
-                        table_row.cell(str(value))
-        self.set_font("Helvetica", "", 11)
-
-    def add_chart(self, chart, max_width=190):
-        """Renders an Altair chart to PNG and places it, page-breaking first
-        if it wouldn't fit in the remaining space on the current page."""
-        if chart is None:
-            return
-        png_bytes = vlc.vegalite_to_png(chart.to_json(), scale=2)
-        img = io.BytesIO(png_bytes)
-
-        from PIL import Image
-
-        pil_img = Image.open(io.BytesIO(png_bytes))
-        w_px, h_px = pil_img.size
-        w = max_width
-        h = w * (h_px / w_px)
-
-        if self.get_y() + h > self.page_break_trigger:
-            self.add_page()
-
-        self.image(img, x=PAGE_MARGIN, w=w, h=h)
-        self.ln(3)
+def _chart_svg(chart) -> str:
+    """Renders an Altair chart to inline SVG — crisper than a rasterized
+    PNG and no image-sizing math needed, since it flows in the page like
+    any other block element. Returns an empty string if there's no chart
+    to plot (the caller can safely concatenate this into a template)."""
+    if chart is None:
+        return ""
+    svg = vlc.vegalite_to_svg(chart.to_json())
+    return f'<div class="chart">{svg}</div>'
 
 
-def _render_viewer_overlap_table(pdf, comps, since_field, title):
+def _section(title: str, body_html: str) -> str:
+    if not body_html:
+        return ""
+    return f'<section class="section"><h2>{_esc(title)}</h2>{body_html}</section>'
+
+
+def _table(headers, rows, link_col=None) -> str:
+    """rows: list of lists of already-escaped cell HTML strings. link_col
+    (if given) is the index whose cell is wrapped in an <a> using the row's
+    last element as the href."""
+    head = "".join(f"<th>{_esc(h)}</th>" for h in headers)
+    body_rows = []
+    for row in rows:
+        url = row[-1] if link_col is not None else None
+        values = row[:-1] if link_col is not None else row
+        cells = []
+        for i, value in enumerate(values):
+            if link_col is not None and i == link_col and url:
+                cells.append(f'<td><a href="{_esc(url)}">{_esc(value)}</a></td>')
+            else:
+                cells.append(f"<td>{_esc(value)}</td>")
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+    return f'<table class="comp-table"><thead><tr>{head}</tr></thead><tbody>{"".join(body_rows)}</tbody></table>'
+
+
+def _viewer_overlap_section(comps, since_field, title) -> str:
     if not comps:
-        return
-    pdf.section_title(title)
+        return ""
     rows = []
     for c in comps[:MAX_COMP_ROWS]:
         price = c.get("sold_price") if c.get("status") == "closed" else c.get("list_price")
@@ -237,14 +163,121 @@ def _render_viewer_overlap_table(pdf, comps, since_field, title):
             "View" if url else "-",
             url,
         ])
-    pdf.comp_table(
-        ["Address", "Status", "Price", "First Flagged", "Link"],
-        rows,
-        col_widths=(5, 2, 2, 2, 2),
-        link_col=4,
-    )
+    body = _table(["Address", "Status", "Price", "First Flagged", "Link"], rows, link_col=4)
     if len(comps) > MAX_COMP_ROWS:
-        pdf.caption_line(f"Showing the {MAX_COMP_ROWS} most recently flagged, of {len(comps)} total.")
+        body += f'<p class="caption">Showing the {MAX_COMP_ROWS} most recently flagged, of {len(comps)} total.</p>'
+    return _section(title, body)
+
+
+CSS_TEMPLATE = """
+@import url('https://fonts.googleapis.com/css2?family=Belleza&family=Work+Sans:wght@400;500;600;700&display=swap');
+
+@page {{
+    size: Letter;
+    margin: 14mm 12mm 16mm 12mm;
+    @bottom-center {{
+        content: "{agent_name} · {brokerage}  |  Page " counter(page);
+        font-family: 'Work Sans', sans-serif;
+        font-size: 8.5pt;
+        color: {slate};
+    }}
+}}
+
+* {{ box-sizing: border-box; }}
+
+body {{
+    font-family: 'Work Sans', sans-serif;
+    color: #1a1a1a;
+    font-size: 10.5pt;
+    line-height: 1.45;
+}}
+
+.hero {{
+    background: {navy};
+    color: white;
+    margin: -14mm -12mm 6mm -12mm;
+    padding: 10mm 12mm 6mm 12mm;
+    border-bottom: 3px solid {gold};
+}}
+.hero h1 {{
+    font-family: 'Belleza', sans-serif;
+    font-weight: 400;
+    font-size: 20pt;
+    letter-spacing: 1px;
+    margin: 0 0 2mm 0;
+}}
+.hero p {{
+    margin: 0;
+    font-size: 10.5pt;
+    color: {mist};
+}}
+
+h2 {{
+    font-family: 'Belleza', sans-serif;
+    font-weight: 400;
+    color: {navy};
+    font-size: 14pt;
+    letter-spacing: 0.5px;
+    margin: 0 0 3mm 0;
+    break-after: avoid;
+}}
+
+.section {{
+    margin-bottom: 7mm;
+}}
+
+.stat-grid {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3mm;
+    margin-bottom: 2mm;
+}}
+.stat-tile {{
+    background: {mist};
+    border-radius: 3px;
+    padding: 3mm 4mm;
+    min-width: 38mm;
+    flex: 1 1 auto;
+}}
+.stat-tile .label {{
+    font-size: 8.5pt;
+    color: {slate};
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 1mm;
+}}
+.stat-tile .value {{
+    font-size: 13pt;
+    font-weight: 600;
+    color: {navy};
+}}
+
+p.body-line {{ margin: 0 0 2mm 0; }}
+p.caption {{ margin: 0 0 1.5mm 0; font-size: 9pt; color: {slate}; }}
+
+.chart {{ margin: 2mm 0 4mm 0; break-inside: avoid; }}
+.chart svg {{ width: 100%; height: auto; display: block; }}
+
+table.comp-table {{
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9pt;
+    margin-bottom: 2mm;
+}}
+table.comp-table th {{
+    background: {mist};
+    color: {navy};
+    text-align: left;
+    font-weight: 600;
+    padding: 1.8mm 2.5mm;
+    border-bottom: 1px solid #ddd;
+}}
+table.comp-table td {{
+    padding: 1.6mm 2.5mm;
+    border-bottom: 1px solid #eee;
+}}
+table.comp-table a {{ color: {navy}; text-decoration: underline; }}
+"""
 
 
 def build_pdf(
@@ -255,14 +288,16 @@ def build_pdf(
     solds_window_months: int = 3,
     known_feedback: list = None,
 ) -> bytes:
-    navy = _hex_to_rgb(BRAND["navy"])
-    slate = _hex_to_rgb(BRAND["slate"])
+    title_text = profile.get("address") or "RootedReports"
 
-    pdf = Report(navy, slate, title_text=profile.get("address") or "RootedReports")
-    pdf.add_page()
+    css = CSS_TEMPLATE.format(
+        navy=BRAND["navy"], gold=BRAND["gold"], slate=BRAND["slate"], mist=BRAND["mist"],
+        agent_name=BRAND["agent_name"], brokerage=BRAND["brokerage"],
+    )
+
+    sections = []
 
     # ---------------------------------------------------------- Key Numbers
-    pdf.section_title("Key Numbers")
     stats_lines = [
         ("List price", _fmt_money(merged.get("list_price"))),
         ("Original list price", _fmt_money(merged.get("original_list_price"))),
@@ -272,84 +307,83 @@ def build_pdf(
         ("Showings (total)", merged.get("showings", {}).get("total")),
         ("Showings (last 30 days)", merged.get("showings", {}).get("last_30_days")),
     ]
-    any_stats = False
-    for label, value in stats_lines:
-        if value:
-            pdf.cell(0, 7, f"{label}: {value}", ln=1)
-            any_stats = True
-    if not any_stats:
-        pdf.caption_line("No basic facts captured yet for this property.")
+    tiles = "".join(
+        f'<div class="stat-tile"><div class="label">{_esc(label)}</div><div class="value">{_esc(value)}</div></div>'
+        for label, value in stats_lines if value
+    )
+    key_numbers_body = f'<div class="stat-grid">{tiles}</div>' if tiles else '<p class="caption">No basic facts captured yet for this property.</p>'
+    sections.append(_section("Key Numbers", key_numbers_body))
 
     # ------------------------------------------------- Price history section
     if merged.get("list_date") or merged.get("original_list_price") or merged.get("price_history") or calc_comps:
-        pdf.section_title("Price History")
+        parts = []
         if merged.get("list_date") or merged.get("original_list_price"):
             date_part = f"Listed {merged['list_date']}" if merged.get("list_date") else "Listed"
             price_part = f" at {_fmt_money(merged['original_list_price'])}" if merged.get("original_list_price") else ""
-            pdf.body_line(f"{date_part}{price_part}.")
+            parts.append(f'<p class="body-line">{_esc(date_part + price_part)}.</p>')
 
         reductions = price_reductions(merged.get("price_history") or [])
         if reductions["chronological"]:
             if reductions["count"]:
-                pdf.body_line(
-                    f"Reduced {reductions['count']} time{'s' if reductions['count'] != 1 else ''}, "
-                    f"totaling {_fmt_money(reductions['total_amount'])}."
+                parts.append(
+                    f'<p class="body-line">Reduced {reductions["count"]} '
+                    f'time{"s" if reductions["count"] != 1 else ""}, totaling {_esc(_fmt_money(reductions["total_amount"]))}.</p>'
                 )
             else:
-                pdf.caption_line("No reductions - price has only gone up or stayed flat in the data we have.")
+                parts.append('<p class="caption">No reductions — price has only gone up or stayed flat in the data we have.</p>')
 
         if calc_comps:
             comp_stats = comp_price_reduction_stats(calc_comps)
             pending_stats, closed_stats, trend = comp_stats["pending"], comp_stats["closed"], comp_stats["trend"]
 
             if pending_stats["pct"] is not None:
-                pdf.caption_line(
-                    f"Pending comps: {pending_stats['reduced']} of {pending_stats['known']} had a price drop "
-                    f"before going pending (~{pending_stats['pct']}%)."
+                parts.append(
+                    f'<p class="caption">Pending comps: {pending_stats["reduced"]} of {pending_stats["known"]} had a price drop '
+                    f'before going pending (~{pending_stats["pct"]}%).</p>'
                 )
             elif pending_stats["known"]:
-                pdf.caption_line(f"Pending comps: only {pending_stats['known']} with known pricing - too few to trust a percentage.")
+                parts.append(f'<p class="caption">Pending comps: only {pending_stats["known"]} with known pricing — too few to trust a percentage.</p>')
 
             if closed_stats["pct"] is not None:
-                pdf.caption_line(
-                    f"Closed comps: {closed_stats['reduced']} of {closed_stats['known']} had a price drop "
-                    f"before selling (~{closed_stats['pct']}%)."
+                parts.append(
+                    f'<p class="caption">Closed comps: {closed_stats["reduced"]} of {closed_stats["known"]} had a price drop '
+                    f'before selling (~{closed_stats["pct"]}%).</p>'
                 )
             elif closed_stats["known"]:
-                pdf.caption_line(f"Closed comps: only {closed_stats['known']} with known pricing - too few to trust a percentage.")
+                parts.append(f'<p class="caption">Closed comps: only {closed_stats["known"]} with known pricing — too few to trust a percentage.</p>')
 
             if trend["enough_data"]:
-                pdf.caption_line(
-                    f"Price-drop rate among closed comps looks {trend['direction']} over the last year "
-                    f"(~{trend['earlier_pct']}% earlier vs ~{trend['recent_pct']}% more recently)."
+                parts.append(
+                    f'<p class="caption">Price-drop rate among closed comps looks {trend["direction"]} over the last year '
+                    f'(~{trend["earlier_pct"]}% earlier vs ~{trend["recent_pct"]}% more recently).</p>'
                 )
-                trend_chart = price_reduction_trend_chart(trend["monthly_pcts"])
-                if trend_chart is not None:
-                    pdf.add_chart(trend_chart)
+                parts.append(_chart_svg(price_reduction_trend_chart(trend["monthly_pcts"])))
             else:
-                pdf.caption_line(
-                    f"Not enough data yet to tell whether price drops are trending over the last year "
-                    f"(usable data for {trend['months_with_data']} of the last 12 months, need at least {MIN_MONTHS_WITH_DATA})."
+                parts.append(
+                    f'<p class="caption">Not enough data yet to tell whether price drops are trending over the last year '
+                    f'(usable data for {trend["months_with_data"]} of the last 12 months, need at least {MIN_MONTHS_WITH_DATA}).</p>'
                 )
+
+        sections.append(_section("Price History", "".join(parts)))
 
     # ------------------------------------------------- Market comparison
     if calc_comps:
-        pdf.section_title("Market Comparison")
+        parts = []
         row_count = len(calc_comps)
         stats = compute_absorption(calc_comps)
 
-        pdf.body_line(f"Total comparable listings used: {row_count}")
+        parts.append(f'<p class="body-line">Total comparable listings used: {row_count}</p>')
         warning = _data_confidence_warning(row_count, stats)
         if warning:
-            pdf.caption_line(warning)
+            parts.append(f'<p class="caption">{_esc(warning)}</p>')
 
-        pdf.body_line(
-            f"Active: {stats['active_count']}   Pending: {stats['pending_count']}   "
-            f"Sold (trailing 12mo): {stats['closed_count_trailing']}"
+        parts.append(
+            f'<p class="body-line">Active: {stats["active_count"]}   Pending: {stats["pending_count"]}   '
+            f'Sold (trailing 12mo): {stats["closed_count_trailing"]}</p>'
         )
         if stats["months_of_supply"] is not None:
-            pdf.body_line(f"Months of supply: {stats['months_of_supply']}")
-            pdf.caption_line(_absorption_caption(stats))
+            parts.append(f'<p class="body-line">Months of supply: {stats["months_of_supply"]}</p>')
+            parts.append(f'<p class="caption">{_esc(_absorption_caption(stats))}</p>')
 
         by_type = absorption_by_property_type(calc_comps)
         nc_stats = compute_new_construction_absorption(calc_comps)
@@ -369,25 +403,23 @@ def build_pdf(
             bars.append({"label": nc_label, "months_of_supply": nc_stats["months_of_supply"], "highlight": False})
 
         if len(bars) > 1:
-            pdf.body_line("By property type:")
-            chart = absorption_chart(bars)
-            if chart is not None:
-                pdf.add_chart(chart)
+            parts.append('<p class="body-line">By property type:</p>')
+            parts.append(_chart_svg(absorption_chart(bars)))
 
             if has_new_construction:
-                pdf.caption_line(
-                    "New Construction reflects time from listing to going under contract, not closing - "
-                    "this accounts for build/completion time that doesn't apply to resale homes."
+                parts.append(
+                    '<p class="caption">New Construction reflects time from listing to going under contract, not closing — '
+                    'this accounts for build/completion time that doesn\'t apply to resale homes.</p>'
                 )
                 nc_days = median_list_to_contract_days(calc_comps, new_construction=True)
                 resale_days = median_list_to_contract_days(calc_comps, new_construction=False)
                 if nc_days is not None:
-                    pdf.caption_line(f"New Construction: {nc_days:.0f} days from list to contract")
+                    parts.append(f'<p class="caption">New Construction: {nc_days:.0f} days from list to contract</p>')
                 if resale_days is not None:
-                    pdf.caption_line(f"Resale: {resale_days:.0f} days from list to contract")
+                    parts.append(f'<p class="caption">Resale: {resale_days:.0f} days from list to contract</p>')
 
             if skipped:
-                pdf.caption_line(f"Not enough sold data yet to calculate a rate for: {', '.join(skipped)}.")
+                parts.append(f'<p class="caption">Not enough sold data yet to calculate a rate for: {_esc(", ".join(skipped))}.</p>')
 
         zip_compare = subdivision_vs_zip_absorption(calc_comps, profile.get("subdivision"), profile.get("property_type"))
         if zip_compare is not None:
@@ -401,42 +433,38 @@ def build_pdf(
                 zip_bars.append({"label": zip_label, "months_of_supply": zip_stats["months_of_supply"], "highlight": False})
 
             if len(zip_bars) == 2:
-                pdf.body_line(f"{profile['subdivision']} vs. the rest of the zip:")
-                zip_chart = absorption_chart(zip_bars)
-                if zip_chart is not None:
-                    pdf.add_chart(zip_chart)
+                parts.append(f'<p class="body-line">{_esc(profile["subdivision"])} vs. the rest of the zip:</p>')
+                parts.append(_chart_svg(absorption_chart(zip_bars)))
 
         if profile.get("property_type"):
             weekly = weekly_contracts(calc_comps, profile["property_type"])
             if any(w["count"] for w in weekly):
                 bucket_label = bucket_property_type(profile["property_type"])
-                pdf.body_line(f"Weekly contracts - {bucket_label} (last ~2 years):")
-                weekly_chart = weekly_contracts_chart(weekly)
-                if weekly_chart is not None:
-                    pdf.add_chart(weekly_chart)
+                parts.append(f'<p class="body-line">Weekly contracts — {_esc(bucket_label)} (last ~2 years):</p>')
+                parts.append(_chart_svg(weekly_contracts_chart(weekly)))
 
         median_psf = median_comp_price_per_sqft(calc_comps)
         if median_psf:
             subject_psf = price_per_sqft(merged.get("list_price"), merged.get("square_feet"))
             you = _fmt_money(subject_psf) if subject_psf else "unknown"
-            pdf.body_line(f"Price per sq ft: you're at {you}, comps median {_fmt_money(median_psf)}")
+            parts.append(f'<p class="body-line">Price per sq ft: you\'re at {_esc(you)}, comps median {_esc(_fmt_money(median_psf))}</p>')
 
         dom_stats = dom_benchmark(calc_comps)
         if dom_stats["active_median_dom"] or dom_stats["pending_median_dom"]:
             if dom_stats["pending_median_dom"]:
-                pdf.caption_line(
-                    f"Comps that went pending typically did so by day {dom_stats['pending_median_dom']} - "
-                    "a rough benchmark for when a listing 'should' go under contract, if it's going to."
+                parts.append(
+                    f'<p class="caption">Comps that went pending typically did so by day {dom_stats["pending_median_dom"]} — '
+                    'a rough benchmark for when a listing \'should\' go under contract, if it\'s going to.</p>'
                 )
             if dom_stats["active_median_dom"]:
-                pdf.caption_line(f"Comps still active have a median of {dom_stats['active_median_dom']} days on market so far.")
+                parts.append(f'<p class="caption">Comps still active have a median of {dom_stats["active_median_dom"]} days on market so far.</p>')
             subject_dom = merged.get("days_on_market")
             if subject_dom and dom_stats["pending_median_dom"]:
                 diff = subject_dom - dom_stats["pending_median_dom"]
                 if diff > 0:
-                    pdf.caption_line(f"You're at {subject_dom} days - {diff} days past that benchmark.")
+                    parts.append(f'<p class="caption">You\'re at {subject_dom} days — {diff} days past that benchmark.</p>')
                 else:
-                    pdf.caption_line(f"You're at {subject_dom} days - still within that typical window.")
+                    parts.append(f'<p class="caption">You\'re at {subject_dom} days — still within that typical window.</p>')
 
         scope = data_scope_summary(calc_comps)
         scope_parts = []
@@ -449,26 +477,23 @@ def build_pdf(
         if scope["sqft_range"]:
             scope_parts.append(f"{scope['sqft_range'][0]:,}-{scope['sqft_range'][1]:,} sqft observed")
         if scope_parts:
-            pdf.ln(1)
-            pdf.caption_line("Data scope: " + " · ".join(scope_parts))
+            parts.append(f'<p class="caption">Data scope: {_esc(" · ".join(scope_parts))}</p>')
 
         chart_comps = filter_recent_closed(calc_comps, months=solds_window_months)
         market_rate_price = median_psf * merged["square_feet"] if median_psf and merged.get("square_feet") else None
         closed_median_dom = median_comp_days_on_market([c for c in chart_comps if c.get("status") == "closed"])
-        pdf.add_chart(
-            price_position_chart(
-                chart_comps, merged.get("list_price"), merged.get("days_on_market"),
-                market_rate_price, closed_median_dom,
-            )
-        )
+        parts.append(_chart_svg(price_position_chart(
+            chart_comps, merged.get("list_price"), merged.get("days_on_market"),
+            market_rate_price, closed_median_dom,
+        )))
+
+        sections.append(_section("Market Comparison", "".join(parts)))
 
         # ---------------------------------------- Active listings (with links)
         active_comps = [c for c in calc_comps if c.get("status") == "active" and c.get("list_price")]
         subject_price = merged.get("list_price")
         active_comps.sort(key=lambda c: abs(c["list_price"] - subject_price) if subject_price else 0)
         if active_comps:
-            pdf.section_title("Active Listings You're Competing With")
-            pdf.caption_line("Tap \"View\" to see that listing's current search result.")
             rows = []
             for c in active_comps[:MAX_COMP_ROWS]:
                 psf = price_per_sqft(c.get("list_price"), c.get("square_feet"))
@@ -481,20 +506,16 @@ def build_pdf(
                     "View" if url else "-",
                     url,
                 ])
-            pdf.comp_table(
-                ["Address", "List Price", "DOM", "$/sqft", "Link"],
-                rows,
-                col_widths=(6, 3, 2, 2, 2),
-                link_col=4,
-            )
+            body = '<p class="caption">Tap "View" to see that listing\'s current search result.</p>'
+            body += _table(["Address", "List Price", "DOM", "$/sqft", "Link"], rows, link_col=4)
             if len(active_comps) > MAX_COMP_ROWS:
-                pdf.caption_line(f"Showing the {MAX_COMP_ROWS} closest in price to yours, of {len(active_comps)} active comps total.")
+                body += f'<p class="caption">Showing the {MAX_COMP_ROWS} closest in price to yours, of {len(active_comps)} active comps total.</p>'
+            sections.append(_section("Active Listings You're Competing With", body))
 
         # ------------------------------------------------------ Closed comps
         closed_comps = [c for c in calc_comps if c.get("status") == "closed" and c.get("sold_price")]
         closed_comps.sort(key=lambda c: try_parse_date(c.get("close_date")) or try_parse_date("1900-01-01"), reverse=True)
         if closed_comps:
-            pdf.section_title("Recently Closed Comps")
             rows = []
             for c in closed_comps[:MAX_COMP_ROWS]:
                 psf = price_per_sqft(c.get("sold_price"), c.get("square_feet"))
@@ -502,44 +523,53 @@ def build_pdf(
                 sold = _fmt_money(c.get("sold_price")) or "-"
                 rows.append([
                     c.get("address") or "Unknown address",
-                    f"{orig} -> {sold}",
+                    f"{orig} → {sold}",
                     c.get("days_on_market") if c.get("days_on_market") is not None else "-",
                     _fmt_money(psf) or "-",
                 ])
-            pdf.comp_table(["Address", "Original -> Sold", "DOM", "$/sqft"], rows, col_widths=(6, 4, 2, 2))
+            body = _table(["Address", "Original → Sold", "DOM", "$/sqft"], rows)
             if len(closed_comps) > MAX_COMP_ROWS:
-                pdf.caption_line(f"Showing the {MAX_COMP_ROWS} most recent closings, of {len(closed_comps)} closed comps total.")
+                body += f'<p class="caption">Showing the {MAX_COMP_ROWS} most recent closings, of {len(closed_comps)} closed comps total.</p>'
+            sections.append(_section("Recently Closed Comps", body))
 
         # -------------------------------------------------- Viewer overlap
-        _render_viewer_overlap_table(
-            pdf, also_viewed_comps(calc_comps), "also_viewed_since", "People Who Viewed Your Listing Also Viewed"
-        )
-        _render_viewer_overlap_table(
-            pdf, also_saved_comps(calc_comps), "also_saved_since", "People Who Saved Your Listing Also Saved"
-        )
+        sections.append(_viewer_overlap_section(also_viewed_comps(calc_comps), "also_viewed_since", "People Who Viewed Your Listing Also Viewed"))
+        sections.append(_viewer_overlap_section(also_saved_comps(calc_comps), "also_saved_since", "People Who Saved Your Listing Also Saved"))
 
     # ------------------------------------------------------------ Price bands
     if merged.get("price_bands"):
-        pdf.section_title("Showings by Price Band")
         band = match_price_band(merged.get("list_price"), merged["price_bands"])
-        pdf.add_chart(price_band_chart(merged["price_bands"], band))
+        sections.append(_section("Showings by Price Band", _chart_svg(price_band_chart(merged["price_bands"], band))))
 
     # ------------------------------------------------------------- Feedback
     feedback_entries = known_feedback if known_feedback is not None else (merged.get("feedback") or [])
     if feedback_entries:
-        pdf.section_title("Buyer Feedback")
         rows = [[f.get("date") or "Date unknown", f.get("quote") or ""] for f in feedback_entries]
-        pdf.comp_table(["Date", "Feedback"], rows, col_widths=(2, 8))
+        sections.append(_section("Buyer Feedback", _table(["Date", "Feedback"], rows)))
 
     # ---------------------------------------------------------- Online traffic
     if merged.get("traffic_by_source"):
-        pdf.section_title("Online Traffic")
-        for entry in merged["traffic_by_source"]:
-            pdf.body_line(f"{entry['source']}: {entry['views'] or 0} views, {entry['saves'] or 0} saves")
+        lines = "".join(
+            f'<p class="body-line">{_esc(entry["source"])}: {entry["views"] or 0} views, {entry["saves"] or 0} saves</p>'
+            for entry in merged["traffic_by_source"]
+        )
+        sections.append(_section("Online Traffic", lines))
 
     # ------------------------------------------------------- Agent commentary
     if commentary:
-        pdf.section_title("Agent Commentary")
-        pdf.body_line(commentary)
+        sections.append(_section("Agent Commentary", f'<p class="body-line">{_esc(commentary)}</p>'))
 
-    return bytes(pdf.output())
+    body_html = "".join(sections)
+    full_html = f"""<!doctype html>
+<html>
+<head><meta charset="utf-8"><style>{css}</style></head>
+<body>
+<div class="hero">
+    <h1>{_esc(title_text)}</h1>
+    <p>{_esc(BRAND['brokerage'])} · prepared by {_esc(BRAND['agent_name'])}</p>
+</div>
+{body_html}
+</body>
+</html>"""
+
+    return WeasyHTML(string=full_html).write_pdf()

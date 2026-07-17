@@ -80,7 +80,7 @@ def price_band_chart(price_bands: list, subject_band: str):
             ),
             tooltip=[alt.Tooltip("band:N", title="Price band"), alt.Tooltip("showing_count:Q", title="Showings")],
         )
-        .properties(height=280)
+        .properties(width=600, height=280)
     )
 
 
@@ -183,7 +183,7 @@ def price_position_chart(
         ).encode(x="days_on_market:Q", y=alt.value(10), text="label:N")
         layers.append(dom_text)
 
-    return alt.layer(*layers).properties(height=280)
+    return alt.layer(*layers).properties(width=600, height=280)
 
 
 def absorption_chart(bucket_stats: list):
@@ -200,7 +200,7 @@ def absorption_chart(bucket_stats: list):
         return None
 
     df = pd.DataFrame(bucket_stats)
-    df["color_key"] = df["highlight"].apply(lambda h: "Your property type" if h else "Other")
+    df["color_key"] = df["highlight"].apply(lambda h: "Yours" if h else "Other")
 
     bars = (
         alt.Chart(df)
@@ -210,7 +210,7 @@ def absorption_chart(bucket_stats: list):
             y=alt.Y("months_of_supply:Q", title="Months of supply"),
             color=alt.Color(
                 "color_key:N",
-                scale=alt.Scale(domain=["Your property type", "Other"], range=[CHART_GOLD, NEUTRAL_GRAY]),
+                scale=alt.Scale(domain=["Yours", "Other"], range=[CHART_GOLD, NEUTRAL_GRAY]),
                 legend=alt.Legend(title=None),
             ),
             tooltip=[
@@ -226,7 +226,7 @@ def absorption_chart(bucket_stats: list):
         .encode(x="label:N", y="months_of_supply:Q", text=alt.Text("months_of_supply:Q", format=".1f"))
     )
 
-    return alt.layer(bars, labels).properties(height=280)
+    return alt.layer(bars, labels).properties(width=600, height=280)
 
 
 def weekly_contracts_chart(weekly_counts: list):
@@ -251,7 +251,7 @@ def weekly_contracts_chart(weekly_counts: list):
                 alt.Tooltip("count:Q", title="Contracts"),
             ],
         )
-        .properties(height=280)
+        .properties(width=600, height=280)
     )
 
 
@@ -277,5 +277,5 @@ def price_reduction_trend_chart(monthly_pcts: list):
                 alt.Tooltip("pct:Q", title="% price drop before contract"),
             ],
         )
-        .properties(height=280)
+        .properties(width=600, height=280)
     )
