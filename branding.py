@@ -151,6 +151,29 @@ def inject_css():
         .st-key-properties-list [data-testid="stColumn"]:not(:first-child) {{
             flex: 0 0 auto !important;
         }}
+
+        /* Terms footer link — plain text, not a boxed button, sitting
+        quietly under the brand-footer line rather than competing with it. */
+        .st-key-terms-footer-link {{
+            display: flex;
+            align-items: center;
+            margin-top: 0.25rem;
+        }}
+        .st-key-terms-footer-link [data-testid^="stBaseButton"] {{
+            border: none !important;
+            background: transparent !important;
+            color: {BRAND['slate']} !important;
+            font-size: 0.72rem !important;
+            font-weight: 500 !important;
+            letter-spacing: 1px;
+            padding: 0.1rem 0.3rem !important;
+            min-height: 0 !important;
+        }}
+        .st-key-terms-footer-link [data-testid^="stBaseButton"]:hover {{
+            background: transparent !important;
+            color: {BRAND['navy']} !important;
+            text-decoration: underline;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -202,18 +225,18 @@ def render_footer():
         """,
         unsafe_allow_html=True,
     )
-    _, mid, _ = st.columns([3, 1, 3])
-    with mid:
-        current_view = st.session_state.get("view")
-        if current_view != "terms" and st.button("Terms", key=f"terms-link-{current_view}", width="stretch"):
-            # Parks where we came from rather than calling app.py's goto() —
-            # a detour to read the Terms shouldn't reset in-progress work
-            # (uploaded CSVs, extracted comps, etc.) the way navigating to a
-            # different property or starting fresh should.
-            st.session_state["terms_return"] = {
-                "view": current_view,
-                "slug": st.session_state.get("slug"),
-                "stage": st.session_state.get("stage", "csv"),
-            }
-            st.session_state["view"] = "terms"
-            st.rerun()
+    current_view = st.session_state.get("view")
+    if current_view != "terms":
+        with st.container(key="terms-footer-link"):
+            if st.button("Terms", key=f"terms-link-{current_view}", type="tertiary"):
+                # Parks where we came from rather than calling app.py's goto() —
+                # a detour to read the Terms shouldn't reset in-progress work
+                # (uploaded CSVs, extracted comps, etc.) the way navigating to a
+                # different property or starting fresh should.
+                st.session_state["terms_return"] = {
+                    "view": current_view,
+                    "slug": st.session_state.get("slug"),
+                    "stage": st.session_state.get("stage", "csv"),
+                }
+                st.session_state["view"] = "terms"
+                st.rerun()
