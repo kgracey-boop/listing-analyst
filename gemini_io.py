@@ -31,17 +31,23 @@ comments into a single theme. Each one is its own entry with the date it was
 given if the document states one (e.g. the showing date this feedback is
 attached to); use null if no date is stated for that specific piece of feedback.
 
-Note on showings — read this carefully, a past extraction got this wrong:
-`showings.total` and `showings.last_30_days` must be the number of times the
-SUBJECT property itself has been shown, stated directly in a per-listing
-report (e.g. a "Listing Activity Report"). A Target Market Analysis or
-Pricing Benchmark report's price-band showing counts describe activity across
-MANY competing listings in that price range/segment — that is a completely
-different number from the subject's own showings. Never sum, average, or
-otherwise derive `showings.total`/`showings.last_30_days` from price-band
-data. If a document only gives market-wide/price-band showing counts and
-never states the subject's own showing count, leave `showings.total` and
-`showings.last_30_days` as null — do not substitute the band total.
+Note on showings — read this carefully, past extractions got this wrong twice:
+`showings.total` and `showings.last_30_days` must ONLY be extracted from a
+document that is itself branded/labeled as a **ShowingTime** report (look for
+"ShowingTime" in the document's own header, logo, or footer) — specifically
+its Listing Activity Report, which states the SUBJECT property's own showing
+count directly. If the document is from any other source (Doorify, an MLS
+cut sheet, a Target Market Analysis, a Pricing Benchmark report, anything not
+branded ShowingTime), leave `showings.total` and `showings.last_30_days` as
+null for that document — even if it has a section that looks similar, it is
+tracking something else under a similar-looking label, not the same count.
+Separately: a Target Market Analysis or Pricing Benchmark report's price-band
+showing counts describe activity across MANY competing listings in that price
+range/segment — never sum, average, or otherwise derive
+`showings.total`/`showings.last_30_days` from price-band data, even when the
+document is from ShowingTime. If a ShowingTime document only gives market-wide/
+price-band showing counts and never states the subject's own showing count
+directly, leave both fields null — do not substitute the band total.
 
 Note on also_viewed / also_saved: some reports (e.g. Doorify) include a table
 specifically labeled something like "People who viewed this listing also
