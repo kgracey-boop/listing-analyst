@@ -33,6 +33,7 @@ from market_stats import (
     comp_price_reduction_stats,
     data_scope_summary,
     dom_benchmark,
+    filter_by_subdivision,
     filter_recent_closed,
     match_price_band,
     median_comp_days_on_market,
@@ -310,6 +311,7 @@ def build_pdf(
     prepared_by: str = None,
     brokerage: str = None,
     contact: str = None,
+    comps_scope: str = "all",
 ) -> bytes:
     title_text = profile.get("address") or "RootedReports"
     # "Prepared by"/brokerage/contact reflect whoever's actually using the
@@ -507,7 +509,8 @@ def build_pdf(
         if scope_parts:
             parts.append(f'<p class="caption">Data scope: {_esc(" · ".join(scope_parts))}</p>')
 
-        chart_comps = filter_recent_closed(calc_comps, months=solds_window_months)
+        scoped_comps = filter_by_subdivision(calc_comps, profile.get("subdivision")) if comps_scope == "subdivision" else calc_comps
+        chart_comps = filter_recent_closed(scoped_comps, months=solds_window_months)
         market_rate_price = median_psf * merged["square_feet"] if median_psf and merged.get("square_feet") else None
         closed_median_dom = median_comp_days_on_market([c for c in chart_comps if c.get("status") == "closed"])
         parts.append(_chart_svg(price_position_chart(

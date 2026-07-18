@@ -41,6 +41,7 @@ from market_stats import (
     compute_new_construction_absorption,
     data_scope_summary,
     dom_benchmark,
+    filter_by_subdivision,
     filter_recent_closed,
     match_price_band,
     median_comp_days_on_market,
@@ -319,6 +320,9 @@ COMP_STATUS_GROUPS = [
 SOLDS_WINDOW_OPTIONS = {"Last 3 months": 3, "Last 6 months": 6, "Last 12 months": 12, "All time": None}
 DEFAULT_SOLDS_WINDOW = "Last 3 months"
 
+COMPS_SCOPE_OPTIONS = {"All": "all", "Subdivision only": "subdivision"}
+DEFAULT_COMPS_SCOPE = "All"
+
 
 def comps_by_status(comparable_listings: list) -> dict:
     """Splits comps into Active / Pending / Closed / Failed (expired or
@@ -496,6 +500,7 @@ DEFAULTS = {
     "preparer_brokerage": "Coldwell Banker Advantage",
     "preparer_contact": "",
     "preparer_code": "",
+    "review_autosaved": False,
 }
 for key, value in DEFAULTS.items():
     if key not in st.session_state:
@@ -524,6 +529,7 @@ def goto(view, slug=None, stage="csv"):
     st.session_state["quiet_errors"] = []
     st.session_state["known_comps"] = None
     st.session_state["known_feedback"] = None
+    st.session_state["review_autosaved"] = False
 
 
 def _scroll_facts(placeholder, header_text, stop_event, progress=None):
@@ -752,10 +758,6 @@ def render_csv_stage(profile):
         if stats["months_of_supply"] is not None:
             cols[3].metric("Months of supply", stats["months_of_supply"])
         st.caption(absorption_caption(stats))
-        subject_bucket = bucket_property_type(profile.get("property_type")) if profile.get("property_type") else None
-        render_property_type_breakdown(result["comparable_listings"], subject_bucket)
-        render_zip_vs_subdivision_comparison(result["comparable_listings"], profile.get("subdivision"), profile.get("property_type"))
-        render_weekly_contracts_chart(result["comparable_listings"], profile.get("property_type"))
         if result["unmapped_fields"]:
             st.caption("Some columns in this file weren't recognized — the counts above might be incomplete.")
         with st.expander("See the comps"):
@@ -1058,12 +1060,23 @@ def render_review_stage(slug, profile, history):
                 render_data_scope(calc_comps, stats)
 
                 st.write("**Sample chart** — price vs. days on market for active/pending/closed comps *(prototype)*:")
-                solds_window_label = st.selectbox(
-                    "Solds shown in chart", list(SOLDS_WINDOW_OPTIONS.keys()),
-                    index=list(SOLDS_WINDOW_OPTIONS.keys()).index(DEFAULT_SOLDS_WINDOW),
-                    key="solds_window_label",
-                )
-                comps_for_chart = filter_recent_closed(calc_comps, months=SOLDS_WINDOW_OPTIONS[solds_window_label])
+                scope_col, recency_col = st.columns(2)
+                with scope_col:
+                    scope_label = st.selectbox(
+                        "Comps shown in chart", list(COMPS_SCOPE_OPTIONS.keys()),
+                        index=list(COMPS_SCOPE_OPTIONS.keys()).index(DEFAULT_COMPS_SCOPE),
+                        key="comps_scope_label",
+                    )
+                with recency_col:
+                    solds_window_label = st.selectbox(
+                        "Solds shown in chart", list(SOLDS_WINDOW_OPTIONS.keys()),
+                        index=list(SOLDS_WINDOW_OPTIONS.keys()).index(DEFAULT_SOLDS_WINDOW),
+                        key="solds_window_label",
+                    )
+                scoped_comps = calc_comps
+                if COMPS_SCOPE_OPTIONS[scope_label] == "subdivision":
+                    scoped_comps = filter_by_subdivision(calc_comps, profile.get("subdivision"))
+                comps_for_chart = filter_recent_closed(scoped_comps, months=SOLDS_WINDOW_OPTIONS[solds_window_label])
                 market_rate_price = median_psf * merged["square_feet"] if median_psf and merged.get("square_feet") else None
                 closed_median_dom = median_comp_days_on_market(
                     [c for c in comps_for_chart if c.get("status") == "closed"]
@@ -1106,37 +1119,44 @@ def render_review_stage(slug, profile, history):
                 for note in relevant_notes:
                     st.caption(f"- {note}")
 
+    if not st.session_state.get("review_autosaved"):
+        # Fires once per visit to this stage (not on every widget rerun —
+        # see the flag reset in goto() and "Back to add more reports" below)
+        # so reaching the point where a report can be printed is what saves
+        # it, not a separate manual step the agent could forget to click.
+        snapshot = {
+            "date": date.today().isoformat(),
+            **{k: v for k, v in merged.items() if k != "_conflicts"},
+        }
+        storage.save_snapshot(slug, snapshot)
+        storage.save_known_comps(slug, st.session_state["known_comps"])
+        storage.save_known_feedback(slug, st.session_state["known_feedback"])
+        st.session_state["review_autosaved"] = True
+
     st.subheader("Save & export")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Save this report to history"):
-            snapshot = {
-                "date": date.today().isoformat(),
-                **{k: v for k, v in merged.items() if k != "_conflicts"},
-            }
-            storage.save_snapshot(slug, snapshot)
-            storage.save_known_comps(slug, st.session_state["known_comps"])
-            storage.save_known_feedback(slug, st.session_state["known_feedback"])
-            st.success("Saved. Next report for this property will compare against this one.")
-    with col2:
-        pdf_calc_comps = active_for_calculation(st.session_state["known_comps"]) if st.session_state["known_comps"] else None
-        pdf_solds_window_label = st.session_state.get("solds_window_label", DEFAULT_SOLDS_WINDOW)
-        pdf_solds_window_months = SOLDS_WINDOW_OPTIONS.get(pdf_solds_window_label, SOLDS_WINDOW_OPTIONS[DEFAULT_SOLDS_WINDOW])
-        pdf_feedback = all_feedback_list(st.session_state["known_feedback"]) if st.session_state["known_feedback"] else None
-        st.download_button(
-            "Download PDF report",
-            data=build_pdf(
-                profile, merged, "", pdf_calc_comps, pdf_solds_window_months, pdf_feedback,
-                st.session_state.get("preparer_name"),
-                st.session_state.get("preparer_brokerage"),
-                st.session_state.get("preparer_contact"),
-            ),
-            file_name=f"{slug}-report-{date.today().isoformat()}.pdf",
-            mime="application/pdf",
-        )
+    st.caption("Saved — the next report for this property will compare against this one.")
+    pdf_calc_comps = active_for_calculation(st.session_state["known_comps"]) if st.session_state["known_comps"] else None
+    pdf_solds_window_label = st.session_state.get("solds_window_label", DEFAULT_SOLDS_WINDOW)
+    pdf_solds_window_months = SOLDS_WINDOW_OPTIONS.get(pdf_solds_window_label, SOLDS_WINDOW_OPTIONS[DEFAULT_SOLDS_WINDOW])
+    pdf_scope_label = st.session_state.get("comps_scope_label", DEFAULT_COMPS_SCOPE)
+    pdf_comps_scope = COMPS_SCOPE_OPTIONS.get(pdf_scope_label, COMPS_SCOPE_OPTIONS[DEFAULT_COMPS_SCOPE])
+    pdf_feedback = all_feedback_list(st.session_state["known_feedback"]) if st.session_state["known_feedback"] else None
+    st.download_button(
+        "Download PDF report",
+        data=build_pdf(
+            profile, merged, "", pdf_calc_comps, pdf_solds_window_months, pdf_feedback,
+            st.session_state.get("preparer_name"),
+            st.session_state.get("preparer_brokerage"),
+            st.session_state.get("preparer_contact"),
+            pdf_comps_scope,
+        ),
+        file_name=f"{slug}-report-{date.today().isoformat()}.pdf",
+        mime="application/pdf",
+    )
 
     if st.button("← Back to add more reports"):
         st.session_state["stage"] = "reports"
+        st.session_state["review_autosaved"] = False
         st.rerun()
 
 

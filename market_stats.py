@@ -17,6 +17,7 @@ DATE_FORMATS = ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y", "%B %d, %Y", "%b %d, %Y")
 PROPERTY_TYPE_BUCKETS = {
     "single family": "Single Family",
     "detached": "Single Family",
+    "ranch": "Single Family",
     "townhouse": "Townhome",
     "townhome": "Townhome",
     "attached": "Townhome",
@@ -123,14 +124,20 @@ def compute_absorption(comparable_listings: list, as_of=None) -> dict:
 
 def absorption_by_property_type(comparable_listings: list, as_of=None) -> dict:
     """
-    Groups comps by property_type bucket (Single Family / Townhome / Condo /
-    Other) and computes absorption separately for each — blending, say,
-    townhomes and single-family into one rate hides real differences in how
-    fast each actually moves in the same market at the same time.
+    Groups comps by property_type bucket (Single Family / Townhome / Condo)
+    and computes absorption separately for each — blending, say, townhomes
+    and single-family into one rate hides real differences in how fast each
+    actually moves in the same market at the same time. Comps that don't
+    match one of those three (a duplex, manufactured housing, anything with
+    no property type at all) are just left out of this breakdown entirely —
+    blending a duplex and a manufactured home into one "Other" bar would be
+    just as meaningless as blending them into everything else.
     """
     buckets = {}
     for c in comparable_listings:
         bucket = bucket_property_type(c.get("property_type"))
+        if bucket == "Other/Unknown":
+            continue
         buckets.setdefault(bucket, []).append(c)
 
     return {bucket: compute_absorption(listings, as_of=as_of) for bucket, listings in buckets.items()}
@@ -164,6 +171,17 @@ def subdivision_vs_zip_absorption(comparable_listings: list, subject_subdivision
         "subdivision": compute_absorption(subdivision_comps, as_of=as_of),
         "rest_of_zip": compute_absorption(rest_of_zip_comps, as_of=as_of),
     }
+
+
+def filter_by_subdivision(comparable_listings: list, subject_subdivision: str) -> list:
+    """Comps whose subdivision matches the subject's own — same
+    case/whitespace-insensitive matching as subdivision_vs_zip_absorption().
+    Returns every comp unfiltered if the subject's own subdivision isn't
+    known, since there's nothing to match against."""
+    target = _normalize_subdivision(subject_subdivision)
+    if not target:
+        return list(comparable_listings)
+    return [c for c in comparable_listings if _normalize_subdivision(c.get("subdivision")) == target]
 
 
 WEEKLY_CONTRACTS_WEEKS = 104  # roughly 2 years
