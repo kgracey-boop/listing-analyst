@@ -97,3 +97,54 @@ short summary of what actually got done.
 - Fixed several real bugs along the way (PDF table styling inheriting a
   navy fill, a button-wrapping layout bug from the new uppercase styling,
   a washed-out chart color, a stale-import crash after a dev server reload)
+
+## 2026-07-17 (continued further) — ~2 hours
+
+- Corrected the Terms of Use wording — flagged that "data is never stored
+  permanently" wasn't actually true, and rewrote it to accurately describe
+  persistent storage plus per-agent isolation instead
+- Built per-agent data isolation (agent_slug + property_slug) so agents
+  sharing one instance can't land on each other's saved properties
+- Added a private access code, combined with the agent's name, so that
+  isolation can't be guessed from a name alone
+- Discussed real OAuth login — deferred until April signs on as a paying
+  customer rather than building it speculatively
+- Reworked the RootedReports Rollout Proposal artifact's pricing ($500
+  one-time customization + $100/month starting Aug 1) and trimmed the
+  stale roadmap section
+- Fixed the boxed "Terms" footer link to read as plain text instead of a
+  button (a Streamlit flex-layout gotcha — needed `align-items`, not
+  `justify-content`, since Streamlit's vertical block is already a flex
+  column)
+- Migrated off the deprecated `use_container_width` parameter Streamlit
+  Cloud flagged for removal, leaving the couple of chart calls that don't
+  support the replacement yet
+
+## 2026-07-17 (late night) — ~1 hour
+
+- Fixed a real bug: showings counts were leaking in from non-ShowingTime
+  reports (e.g. Doorify) due to an overly generic extraction rule —
+  tightened to require ShowingTime branding specifically, verified against
+  4 real sample reports
+- Investigated an "unknown status" comp report Kevin noticed — inconclusive
+  on the current data, no fix needed yet
+- Simplified Step 1 to a plain numeric summary — removed the 3 charts
+  there (they're still shown in the final review step)
+- Fixed "Ranch" being miscategorized as Other/Unknown instead of Single
+  Family, then removed the Other/Unknown bucket from the property-type
+  breakdown entirely per request
+- Added an All / Subdivision-only scope toggle for the scattergram
+  (defaults to All), wired through to the PDF as well
+- Built automatic report-saving — reaching the review/download step now
+  saves the report snapshot and comps/feedback history on its own,
+  replacing a manual "save" button
+
+## 2026-07-20 — ~1 hour
+
+- Added a new "Resolve conflicts" step between report upload and review —
+  when sources disagree (e.g. two different showings counts), the agent
+  now picks the correct value directly instead of hunting it down in a
+  separate field afterward
+- Added a rolling per-file summary while Gemini processes uploaded
+  reports — each file's headline numbers appear as soon as it's done,
+  instead of one generic spinner for the whole batch
