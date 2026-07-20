@@ -872,6 +872,42 @@ def render_csv_stage(profile):
         st.error("This file didn't produce any recognizable comps — double-check it's the right export, or skip this step.")
 
 
+def summarize_extraction(filename: str, data: dict) -> str:
+    """One line of real, already-extracted numbers for a just-finished file —
+    shown immediately so the wait isn't a black box. Only mentions a field
+    if it was actually found (e.g. showings stays silent for a non-
+    ShowingTime source, since that's null by design, not zero)."""
+    parts = []
+
+    showings = data.get("showings") or {}
+    if showings.get("total") is not None:
+        parts.append(f"{showings['total']} showings")
+
+    feedback = data.get("feedback") or []
+    if feedback:
+        parts.append(f"{len(feedback)} feedback quote{'s' if len(feedback) != 1 else ''}")
+
+    comps = data.get("comparable_listings") or []
+    if comps:
+        parts.append(f"{len(comps)} comp{'s' if len(comps) != 1 else ''}")
+
+    traffic = data.get("online_traffic") or {}
+    if traffic.get("views") is not None:
+        parts.append(f"{traffic['views']} views")
+
+    bands = (data.get("price_band_analysis") or {}).get("bands") or []
+    if bands:
+        parts.append(f"{len(bands)} price band{'s' if len(bands) != 1 else ''}")
+
+    history = data.get("price_history") or []
+    if history:
+        parts.append(f"{len(history)} price point{'s' if len(history) != 1 else ''}")
+
+    if parts:
+        return f"**{filename}** — {', '.join(parts)}"
+    return f"**{filename}** — processed, nothing new to report"
+
+
 def render_reports_stage():
     st.subheader("Step 2 of 4: Other reports")
     st.caption("Upload activity or marketing reports for this property — Doorify, ShowingTime, etc.")
@@ -885,6 +921,7 @@ def render_reports_stage():
     unprocessed = [f for f in uploaded_files if f.name not in st.session_state["processed_files"]]
     if unprocessed:
         client = get_client()
+        results_area = st.container()
         loading = st.empty()
         for i, f in enumerate(unprocessed):
             header = f"Analyzing **{f.name}**  ·  file {i + 1} of {len(unprocessed)}"
@@ -896,6 +933,8 @@ def render_reports_stage():
                 with scrolling_loader(loading, header, progress=(i + 1) / len(unprocessed)):
                     data = extract_json(client, tmp_path, ACTIVITY_PROMPT)
                 st.session_state["sources"].append({"source": f.name, "data": data})
+                with results_area:
+                    st.success(summarize_extraction(f.name, data))
             except Exception as e:
                 print(f"[extraction error] {f.name}: {e}")  # kept out of the user-facing UI on purpose
                 st.session_state["quiet_errors"].append(f.name)
