@@ -501,6 +501,7 @@ DEFAULTS = {
     "preparer_contact": "",
     "preparer_code": "",
     "review_autosaved": False,
+    "conflict_resolutions": {},
 }
 for key, value in DEFAULTS.items():
     if key not in st.session_state:
@@ -530,6 +531,7 @@ def goto(view, slug=None, stage="csv"):
     st.session_state["known_comps"] = None
     st.session_state["known_feedback"] = None
     st.session_state["review_autosaved"] = False
+    st.session_state["conflict_resolutions"] = {}
 
 
 def _scroll_facts(placeholder, header_text, stop_event, progress=None):
@@ -714,10 +716,100 @@ def render_property():
         render_csv_stage(profile)
     elif stage == "reports":
         render_reports_stage()
+    elif stage == "conflicts":
+        render_conflicts_stage(slug, profile, history)
     elif stage == "review":
         render_review_stage(slug, profile, history)
 
     render_footer()
+
+
+CONFLICT_FIELD_LABELS = {
+    "address": "Address",
+    "list_price": "List price",
+    "original_list_price": "Original list price",
+    "list_date": "List date",
+    "days_on_market": "Days on market",
+    "square_feet": "Square feet",
+    "showings.total": "Showings (total)",
+    "showings.last_30_days": "Showings (last 30 days)",
+}
+
+CONFLICT_FIELD_FORMATTERS = {
+    "list_price": lambda v: f"${v:,.0f}",
+    "original_list_price": lambda v: f"${v:,.0f}",
+    "square_feet": lambda v: f"{v:,} sqft",
+    "days_on_market": lambda v: f"{v} days",
+}
+
+
+def format_conflict_value(field, value):
+    formatter = CONFLICT_FIELD_FORMATTERS.get(field)
+    if formatter:
+        try:
+            return formatter(value)
+        except (TypeError, ValueError):
+            pass
+    return str(value)
+
+
+def build_merged(history):
+    """The merged view for this visit — fresh sources if any were uploaded,
+    else the last saved snapshot (which never carries `_conflicts`, since
+    save_snapshot strips it, so falling back to history never re-surfaces
+    conflicts already settled on a prior visit)."""
+    if st.session_state["sources"]:
+        return merge_extractions(st.session_state["sources"])
+    if history:
+        return {**empty_merged(), **{k: v for k, v in history[-1].items() if k != "date"}}
+    return empty_merged()
+
+
+def merged_with_resolutions(history):
+    """build_merged() plus whatever the agent already picked on the Resolve
+    conflicts step. A stored resolution for a field no longer in
+    `_conflicts` (e.g. the agent went back and re-uploaded a different set
+    of reports) is simply ignored rather than force-applied."""
+    merged = build_merged(history)
+    for field, value in st.session_state["conflict_resolutions"].items():
+        if field not in merged["_conflicts"]:
+            continue
+        if "." in field:
+            parent, child = field.split(".", 1)
+            merged[parent][child] = value
+        else:
+            merged[field] = value
+        merged["_conflicts"].pop(field, None)
+    return merged
+
+
+def render_conflicts_stage(slug, profile, history):
+    merged = merged_with_resolutions(history)
+
+    if not merged["_conflicts"]:
+        st.session_state["stage"] = "review"
+        st.rerun()
+        return
+
+    st.subheader("Step 3 of 4: Resolve conflicts")
+    st.caption("Your reports didn't agree on these — pick the correct value for each.")
+
+    for field, candidates in merged["_conflicts"].items():
+        label = CONFLICT_FIELD_LABELS.get(field, field.replace("_", " ").replace(".", " ").title())
+        options = [f"{format_conflict_value(field, c['value'])}  —  {c['source']}" for c in candidates]
+        choice = st.radio(label, options, index=None, key=f"conflict_radio_{field}")
+        if choice is not None:
+            st.session_state["conflict_resolutions"][field] = candidates[options.index(choice)]["value"]
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("← Back"):
+            st.session_state["stage"] = "reports"
+            st.rerun()
+    with col2:
+        if st.button("Continue to review", type="primary"):
+            st.session_state["stage"] = "review"
+            st.rerun()
 
 
 def render_csv_stage(profile):
@@ -730,7 +822,7 @@ def render_csv_stage(profile):
         st.text_input("Brokerage", key="preparer_brokerage")
     st.text_input("Contact info (optional — shown on the report if filled in)", key="preparer_contact")
 
-    st.subheader("Step 1 of 3: MLS comp data")
+    st.subheader("Step 1 of 4: MLS comp data")
     st.caption(
         "Upload a CSV export covering the last 2 years — active, pending, active under contract, "
         "closed/sold, expired, withdrawn, and coming soon. Needed for an industry-standard absorption "
@@ -781,7 +873,7 @@ def render_csv_stage(profile):
 
 
 def render_reports_stage():
-    st.subheader("Step 2 of 3: Other reports")
+    st.subheader("Step 2 of 4: Other reports")
     st.caption("Upload activity or marketing reports for this property — Doorify, ShowingTime, etc.")
     uploaded_files = st.file_uploader(
         "Upload reports",
@@ -826,22 +918,18 @@ def render_reports_stage():
             st.session_state["stage"] = "csv"
             st.rerun()
     with col2:
-        if st.button("Continue to review", type="primary"):
-            st.session_state["stage"] = "review"
+        if st.button("Continue", type="primary"):
+            st.session_state["stage"] = "conflicts"
             st.rerun()
 
 
 def render_review_stage(slug, profile, history):
-    st.subheader("Step 3 of 3: Review")
+    st.subheader("Step 4 of 4: Review")
     st.caption("Each section below is collapsed by default — open whichever ones you need to check or edit.")
 
-    if st.session_state["sources"]:
-        merged = merge_extractions(st.session_state["sources"])
-    elif history:
+    if not st.session_state["sources"] and history:
         st.info(f"No new reports uploaded this visit — showing your last saved report ({history[-1]['date']}).")
-        merged = {**empty_merged(), **{k: v for k, v in history[-1].items() if k != "date"}}
-    else:
-        merged = empty_merged()
+    merged = merged_with_resolutions(history)
 
     if st.session_state["known_comps"] is None:
         st.session_state["known_comps"] = storage.load_known_comps(slug)
@@ -1109,10 +1197,11 @@ def render_review_stage(slug, profile, history):
     if merged["_conflicts"] or merged["notes_on_missing_or_unclear_data"]:
         with st.expander("Data quality notes"):
             if merged["_conflicts"]:
-                st.caption("Sources disagreed on these — pick the right value in Basic facts above:")
+                st.caption("Skipped on the Resolve conflicts step — pick the right value in Basic facts above:")
                 for field, values in merged["_conflicts"].items():
-                    detail = ", ".join(f"{v['value']} ({v['source']})" for v in values)
-                    st.caption(f"- {field}: {detail}")
+                    label = CONFLICT_FIELD_LABELS.get(field, field.replace("_", " ").replace(".", " ").title())
+                    detail = ", ".join(f"{format_conflict_value(field, v['value'])} ({v['source']})" for v in values)
+                    st.caption(f"- {label}: {detail}")
             relevant_notes = filter_stale_notes(merged["notes_on_missing_or_unclear_data"], merged)
             if relevant_notes:
                 st.caption("Notes on missing or unclear data:")
@@ -1157,6 +1246,7 @@ def render_review_stage(slug, profile, history):
     if st.button("← Back to add more reports"):
         st.session_state["stage"] = "reports"
         st.session_state["review_autosaved"] = False
+        st.session_state["conflict_resolutions"] = {}
         st.rerun()
 
 
