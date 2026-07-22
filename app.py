@@ -962,6 +962,50 @@ def render_reports_stage():
             st.rerun()
 
 
+def _flatten_for_debug(value, prefix=""):
+    """Turns a nested dict/list into flat (dotted-path, value) rows for the
+    debug table — lists show their length plus a sample of the first item,
+    rather than dumping every row, so a 40-comp list doesn't bury the rest."""
+    rows = []
+    if isinstance(value, dict):
+        if not value:
+            rows.append((prefix or "(root)", "{} (empty)"))
+        for key, val in value.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            rows.extend(_flatten_for_debug(val, path))
+    elif isinstance(value, list):
+        if not value:
+            rows.append((prefix, "[] (empty)"))
+        else:
+            rows.append((prefix, f"list of {len(value)}"))
+            rows.extend(_flatten_for_debug(value[0], f"{prefix}[0]"))
+    else:
+        rows.append((prefix, value))
+    return rows
+
+
+def render_debug_panel(merged, profile, known_comps, known_feedback, computed):
+    """Rough-draft aid, not a client-facing feature: a flattened view of every
+    field currently available on this property, for sketching new report
+    formatting against real variable names/values rather than guessing."""
+    with st.expander("🔧 Debug: available variables"):
+        st.caption(
+            "Flattened view of every field populated for this property right now — "
+            "for brainstorming layout/formatting, not part of the client-facing report."
+        )
+        rows = []
+        rows.extend(_flatten_for_debug(merged, "merged"))
+        rows.extend(_flatten_for_debug(profile, "profile"))
+        rows.append(("known_comps.count", len(known_comps) if known_comps else 0))
+        if known_comps:
+            excluded = sum(1 for c in known_comps if c.get("excluded"))
+            rows.append(("known_comps.excluded_count", excluded))
+        rows.append(("known_feedback.count", len(known_feedback) if known_feedback else 0))
+        rows.extend(_flatten_for_debug(computed, "computed"))
+        debug_df = pd.DataFrame(rows, columns=["Variable", "Value"])
+        st.dataframe(debug_df, width="stretch", hide_index=True)
+
+
 def render_review_stage(slug, profile, history):
     st.subheader("Step 4 of 4: Review")
     st.caption("Each section below is collapsed by default — open whichever ones you need to check or edit.")
@@ -969,6 +1013,7 @@ def render_review_stage(slug, profile, history):
     if not st.session_state["sources"] and history:
         st.info(f"No new reports uploaded this visit — showing your last saved report ({history[-1]['date']}).")
     merged = merged_with_resolutions(history)
+    computed = {}
 
     if st.session_state["known_comps"] is None:
         st.session_state["known_comps"] = storage.load_known_comps(slug)
@@ -1004,6 +1049,7 @@ def render_review_stage(slug, profile, history):
             st.caption(f"{date_part}{price_part}.")
 
         reductions = price_reductions(merged["price_history"])
+        computed["price_reductions"] = reductions
         if reductions["chronological"]:
             if reductions["count"]:
                 st.metric(
@@ -1020,6 +1066,7 @@ def render_review_stage(slug, profile, history):
         calc_comps_for_reductions = active_for_calculation(st.session_state["known_comps"]) if st.session_state["known_comps"] else []
         if calc_comps_for_reductions:
             comp_reduction_stats = comp_price_reduction_stats(calc_comps_for_reductions)
+            computed["comp_price_reduction_stats"] = comp_reduction_stats
             st.write("Price drops among comps:")
 
             pending_stats = comp_reduction_stats["pending"]
@@ -1108,6 +1155,7 @@ def render_review_stage(slug, profile, history):
 
     with st.expander("Momentum"):
         current_views = total_views(merged)
+        computed["total_views"] = current_views
         if not history:
             st.info("This is the first report for this property — momentum will show starting next time.")
         else:
@@ -1140,6 +1188,7 @@ def render_review_stage(slug, profile, history):
                     st.caption(f"{excluded_count} comp{'s' if excluded_count != 1 else ''} excluded from the numbers below.")
 
                 stats = compute_absorption(calc_comps)
+                computed["absorption_stats"] = stats
                 row_count = len(calc_comps)
 
                 st.metric("Total comparable listings used", row_count)
@@ -1155,18 +1204,22 @@ def render_review_stage(slug, profile, history):
                     cols[3].metric("Months of supply", stats["months_of_supply"])
                     st.caption(absorption_caption(stats))
                 subject_bucket = bucket_property_type(profile.get("property_type")) if profile.get("property_type") else None
+                computed["subject_property_type_bucket"] = subject_bucket
                 render_property_type_breakdown(calc_comps, subject_bucket)
                 render_zip_vs_subdivision_comparison(calc_comps, profile.get("subdivision"), profile.get("property_type"))
                 render_weekly_contracts_chart(calc_comps, profile.get("property_type"))
 
                 median_psf = median_comp_price_per_sqft(calc_comps)
+                computed["median_comp_price_per_sqft"] = median_psf
                 if median_psf:
                     subject_psf = price_per_sqft(merged.get("list_price"), merged.get("square_feet"))
+                    computed["subject_price_per_sqft"] = subject_psf
                     you = money(subject_psf) if subject_psf else "unknown"
                     st.write("Compared to the comps:")
                     st.caption(f"- Price per sq ft: you're at {you}, comps median {money(median_psf)}")
 
                 dom_stats = dom_benchmark(calc_comps)
+                computed["dom_benchmark"] = dom_stats
                 if dom_stats["active_median_dom"] or dom_stats["pending_median_dom"]:
                     st.write("Days on market — active vs. pending:")
                     if dom_stats["pending_median_dom"]:
@@ -1227,6 +1280,7 @@ def render_review_stage(slug, profile, history):
 
             if merged["price_bands"]:
                 band = match_price_band(merged.get("list_price"), merged["price_bands"])
+                computed["subject_price_band"] = band
 
                 st.write("**Sample chart** — showings by price band *(prototype)*:")
                 band_chart = price_band_chart(merged["price_bands"], band)
@@ -1260,6 +1314,8 @@ def render_review_stage(slug, profile, history):
         storage.save_known_comps(slug, st.session_state["known_comps"])
         storage.save_known_feedback(slug, st.session_state["known_feedback"])
         st.session_state["review_autosaved"] = True
+
+    render_debug_panel(merged, profile, st.session_state["known_comps"], st.session_state["known_feedback"], computed)
 
     st.subheader("Save & export")
     st.caption("Saved — the next report for this property will compare against this one.")
