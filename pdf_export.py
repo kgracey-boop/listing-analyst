@@ -139,6 +139,29 @@ def _section(title: str, body_html: str) -> str:
     return f'<section class="section"><h2>{_esc(title)}</h2>{body_html}</section>'
 
 
+def _section_enabled(section_toggles, key) -> bool:
+    """section_toggles is None (no toggles passed — e.g. older callers)
+    means everything's on; otherwise missing keys also default to on, so a
+    newly added section doesn't silently vanish for an agent whose choices
+    predate it."""
+    return section_toggles is None or section_toggles.get(key, True)
+
+
+def _chart_row(*column_htmls) -> str:
+    """Lays out 1+ pre-rendered columns (each already a label + chart,
+    etc.) side by side, for a shorter/cleaner PDF than stacking every
+    chart full-width. Falls back to full width for a lone column instead
+    of stretching one chart across a half-width slot when its sibling
+    didn't compute (too little data, e.g.)."""
+    columns = [html for html in column_htmls if html]
+    if not columns:
+        return ""
+    if len(columns) == 1:
+        return columns[0]
+    cols_html = "".join(f'<div class="chart-col">{html}</div>' for html in columns)
+    return f'<div class="chart-row">{cols_html}</div>'
+
+
 def _table(headers, rows, link_col=None) -> str:
     """rows: list of lists of already-escaped cell HTML strings. link_col
     (if given) is the index whose cell is wrapped in an <a> using the row's
@@ -279,6 +302,9 @@ p.caption {{ margin: 0 0 1.5mm 0; font-size: 9pt; color: {slate}; }}
 .chart {{ margin: 2mm 0 4mm 0; break-inside: avoid; }}
 .chart svg {{ width: 100%; height: auto; display: block; }}
 
+.chart-row {{ display: flex; gap: 5mm; align-items: flex-start; break-inside: avoid; }}
+.chart-row .chart-col {{ flex: 1 1 0; min-width: 0; }}
+
 table.comp-table {{
     width: 100%;
     border-collapse: collapse;
@@ -312,6 +338,7 @@ def build_pdf(
     brokerage: str = None,
     contact: str = None,
     comps_scope: str = "all",
+    section_toggles: dict = None,
 ) -> bytes:
     title_text = profile.get("address") or "RootedReports"
     # "Prepared by"/brokerage/contact reflect whoever's actually using the
@@ -345,7 +372,9 @@ def build_pdf(
     sections.append(_section("Key Numbers", key_numbers_body))
 
     # ------------------------------------------------- Price history section
-    if merged.get("list_date") or merged.get("original_list_price") or merged.get("price_history") or calc_comps:
+    if _section_enabled(section_toggles, "price_history") and (
+        merged.get("list_date") or merged.get("original_list_price") or merged.get("price_history") or calc_comps
+    ):
         parts = []
         if merged.get("list_date") or merged.get("original_list_price"):
             date_part = f"Listed {merged['list_date']}" if merged.get("list_date") else "Listed"
@@ -432,10 +461,31 @@ def build_pdf(
             nc_label = f"New Construction in {postal_codes[0]}" if len(postal_codes) == 1 else "New Construction"
             bars.append({"label": nc_label, "months_of_supply": nc_stats["months_of_supply"], "highlight": False})
 
+        by_type_col = ""
         if len(bars) > 1:
-            parts.append('<p class="body-line">By property type:</p>')
-            parts.append(_chart_svg(absorption_chart(bars)))
+            by_type_col = '<p class="body-line">By property type:</p>' + _chart_svg(absorption_chart(bars))
 
+        zip_compare = subdivision_vs_zip_absorption(calc_comps, profile.get("subdivision"), profile.get("property_type"))
+        zip_col = ""
+        if zip_compare is not None:
+            sub_stats, zip_stats = zip_compare["subdivision"], zip_compare["rest_of_zip"]
+            zip_bars = []
+            if sub_stats["months_of_supply"] is not None:
+                zip_bars.append({"label": profile["subdivision"], "months_of_supply": sub_stats["months_of_supply"], "highlight": True})
+            if zip_stats["months_of_supply"] is not None:
+                postal_codes = sorted({c["postal_code"] for c in calc_comps if c.get("postal_code")})
+                zip_label = f"Rest of {postal_codes[0]}" if len(postal_codes) == 1 else "Rest of ZIP"
+                zip_bars.append({"label": zip_label, "months_of_supply": zip_stats["months_of_supply"], "highlight": False})
+
+            if len(zip_bars) == 2:
+                zip_col = f'<p class="body-line">{_esc(profile["subdivision"])} vs. the rest of the zip:</p>' + _chart_svg(absorption_chart(zip_bars))
+
+        # Side by side when both computed — same chart type (months-of-supply
+        # bars), just different breakdowns, so pairing them reads as one
+        # comparison instead of two stacked, near-identical-looking charts.
+        parts.append(_chart_row(by_type_col, zip_col))
+
+        if len(bars) > 1:
             if has_new_construction:
                 parts.append(
                     '<p class="caption">New Construction reflects time from listing to going under contract, not closing — '
@@ -450,21 +500,6 @@ def build_pdf(
 
             if skipped:
                 parts.append(f'<p class="caption">Not enough sold data yet to calculate a rate for: {_esc(", ".join(skipped))}.</p>')
-
-        zip_compare = subdivision_vs_zip_absorption(calc_comps, profile.get("subdivision"), profile.get("property_type"))
-        if zip_compare is not None:
-            sub_stats, zip_stats = zip_compare["subdivision"], zip_compare["rest_of_zip"]
-            zip_bars = []
-            if sub_stats["months_of_supply"] is not None:
-                zip_bars.append({"label": profile["subdivision"], "months_of_supply": sub_stats["months_of_supply"], "highlight": True})
-            if zip_stats["months_of_supply"] is not None:
-                postal_codes = sorted({c["postal_code"] for c in calc_comps if c.get("postal_code")})
-                zip_label = f"Rest of {postal_codes[0]}" if len(postal_codes) == 1 else "Rest of ZIP"
-                zip_bars.append({"label": zip_label, "months_of_supply": zip_stats["months_of_supply"], "highlight": False})
-
-            if len(zip_bars) == 2:
-                parts.append(f'<p class="body-line">{_esc(profile["subdivision"])} vs. the rest of the zip:</p>')
-                parts.append(_chart_svg(absorption_chart(zip_bars)))
 
         if profile.get("property_type"):
             weekly = weekly_contracts(calc_comps, profile["property_type"])
@@ -518,13 +553,14 @@ def build_pdf(
             market_rate_price, closed_median_dom,
         )))
 
-        sections.append(_section("Market Comparison", "".join(parts)))
+        if _section_enabled(section_toggles, "market_comparison"):
+            sections.append(_section("Market Comparison", "".join(parts)))
 
         # ---------------------------------------- Active listings (with links)
         active_comps = [c for c in calc_comps if c.get("status") == "active" and c.get("list_price")]
         subject_price = merged.get("list_price")
         active_comps.sort(key=lambda c: abs(c["list_price"] - subject_price) if subject_price else 0)
-        if active_comps:
+        if active_comps and _section_enabled(section_toggles, "active_listings"):
             rows = []
             for c in active_comps[:MAX_COMP_ROWS]:
                 psf = price_per_sqft(c.get("list_price"), c.get("square_feet"))
@@ -546,7 +582,7 @@ def build_pdf(
         # ------------------------------------------------------ Closed comps
         closed_comps = [c for c in calc_comps if c.get("status") == "closed" and c.get("sold_price")]
         closed_comps.sort(key=lambda c: try_parse_date(c.get("close_date")) or try_parse_date("1900-01-01"), reverse=True)
-        if closed_comps:
+        if closed_comps and _section_enabled(section_toggles, "closed_comps"):
             rows = []
             for c in closed_comps[:MAX_COMP_ROWS]:
                 psf = price_per_sqft(c.get("sold_price"), c.get("square_feet"))
@@ -564,22 +600,23 @@ def build_pdf(
             sections.append(_section("Recently Closed Comps", body))
 
         # -------------------------------------------------- Viewer overlap
-        sections.append(_viewer_overlap_section(also_viewed_comps(calc_comps), "also_viewed_since", "People Who Viewed Your Listing Also Viewed"))
-        sections.append(_viewer_overlap_section(also_saved_comps(calc_comps), "also_saved_since", "People Who Saved Your Listing Also Saved"))
+        if _section_enabled(section_toggles, "viewer_overlap"):
+            sections.append(_viewer_overlap_section(also_viewed_comps(calc_comps), "also_viewed_since", "People Who Viewed Your Listing Also Viewed"))
+            sections.append(_viewer_overlap_section(also_saved_comps(calc_comps), "also_saved_since", "People Who Saved Your Listing Also Saved"))
 
     # ------------------------------------------------------------ Price bands
-    if merged.get("price_bands"):
+    if merged.get("price_bands") and _section_enabled(section_toggles, "price_bands"):
         band = match_price_band(merged.get("list_price"), merged["price_bands"])
         sections.append(_section("Showings by Price Band", _chart_svg(price_band_chart(merged["price_bands"], band))))
 
     # ------------------------------------------------------------- Feedback
     feedback_entries = known_feedback if known_feedback is not None else (merged.get("feedback") or [])
-    if feedback_entries:
+    if feedback_entries and _section_enabled(section_toggles, "feedback"):
         rows = [[f.get("date") or "Date unknown", f.get("quote") or ""] for f in feedback_entries]
         sections.append(_section("Buyer Feedback", _table(["Date", "Feedback"], rows)))
 
     # ---------------------------------------------------------- Online traffic
-    if merged.get("traffic_by_source"):
+    if merged.get("traffic_by_source") and _section_enabled(section_toggles, "online_traffic"):
         lines = "".join(
             f'<p class="body-line">{_esc(entry["source"])}: {entry["views"] or 0} views, {entry["saves"] or 0} saves</p>'
             for entry in merged["traffic_by_source"]

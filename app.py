@@ -323,6 +323,18 @@ DEFAULT_SOLDS_WINDOW = "Last 3 months"
 COMPS_SCOPE_OPTIONS = {"All": "all", "Subdivision only": "subdivision"}
 DEFAULT_COMPS_SCOPE = "All"
 
+# Key Numbers always shows — it's the core snapshot, not worth making optional.
+PDF_SECTION_TOGGLES = [
+    ("price_history", "Price history & reductions"),
+    ("market_comparison", "Market comparison (absorption, price/sqft, DOM)"),
+    ("active_listings", "Active listings you're competing with"),
+    ("closed_comps", "Recently closed comps"),
+    ("viewer_overlap", "Viewer overlap (\"also viewed\" / \"also saved\")"),
+    ("price_bands", "Showings by price band"),
+    ("feedback", "Buyer feedback"),
+    ("online_traffic", "Online traffic"),
+]
+
 
 def comps_by_status(comparable_listings: list) -> dict:
     """Splits comps into Active / Pending / Closed / Failed (expired or
@@ -1319,6 +1331,14 @@ def render_review_stage(slug, profile, history):
 
     st.subheader("Save & export")
     st.caption("Saved — the next report for this property will compare against this one.")
+
+    with st.expander("Choose report sections"):
+        st.caption("Uncheck anything you don't want in this property's PDF — Key Numbers always shows.")
+        section_toggles = {
+            key: st.checkbox(label, value=True, key=f"section_toggle_{key}")
+            for key, label in PDF_SECTION_TOGGLES
+        }
+
     pdf_calc_comps = active_for_calculation(st.session_state["known_comps"]) if st.session_state["known_comps"] else None
     pdf_solds_window_label = st.session_state.get("solds_window_label", DEFAULT_SOLDS_WINDOW)
     pdf_solds_window_months = SOLDS_WINDOW_OPTIONS.get(pdf_solds_window_label, SOLDS_WINDOW_OPTIONS[DEFAULT_SOLDS_WINDOW])
@@ -1333,6 +1353,7 @@ def render_review_stage(slug, profile, history):
             st.session_state.get("preparer_brokerage"),
             st.session_state.get("preparer_contact"),
             pdf_comps_scope,
+            section_toggles,
         ),
         file_name=f"{slug}-report-{date.today().isoformat()}.pdf",
         mime="application/pdf",
