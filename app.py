@@ -998,7 +998,7 @@ def render_debug_panel(merged, profile, known_comps, known_feedback, computed):
         rows.extend(_flatten_for_debug(profile, "profile"))
         rows.append(("known_comps.count", len(known_comps) if known_comps else 0))
         if known_comps:
-            excluded = sum(1 for c in known_comps if c.get("excluded"))
+            excluded = sum(1 for c in known_comps.values() if c.get("excluded"))
             rows.append(("known_comps.excluded_count", excluded))
         rows.append(("known_feedback.count", len(known_feedback) if known_feedback else 0))
         rows.extend(_flatten_for_debug(computed, "computed"))
