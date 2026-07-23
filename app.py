@@ -388,7 +388,7 @@ def render_comps_tables(comparable_listings: list):
 
 COMP_DISPLAY_COLUMNS = [
     "address", "status", "list_price", "original_list_price", "sold_price",
-    "square_feet", "days_on_market", "close_date", "property_type", "source",
+    "square_feet", "days_on_market", "close_date", "property_type", "link_or_reference", "source",
     "excluded", "excluded_reason",
 ]
 
@@ -447,6 +447,11 @@ def render_comps_editor(known_comps: dict) -> dict:
         column_config = {
             "excluded": st.column_config.CheckboxColumn("Exclude"),
             "excluded_reason": st.column_config.TextColumn("Reason"),
+            # Shown so it's obvious which comps are missing an MLS# and
+            # therefore won't get a "View" link in the printed report --
+            # previously invisible, so a missing link could only be
+            # diagnosed by asking someone to check the raw data.
+            "link_or_reference": st.column_config.TextColumn("MLS #"),
         }
         disabled_cols = [c for c in COMP_DISPLAY_COLUMNS if c not in ("excluded", "excluded_reason")]
         if is_active:
