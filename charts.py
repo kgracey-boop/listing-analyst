@@ -247,8 +247,16 @@ def weekly_contracts_chart(weekly_counts: list):
     df = pd.DataFrame(weekly_counts)
     width = max(600, len(df) * 8)
 
+    # Ticks every 4 weeks (~monthly) by default -- an actually meaningful
+    # unit, not an arbitrary count. Only widens (in 4-week/month steps) if
+    # monthly ticks wouldn't fit without crowding; a longer window reads as
+    # "every 2 months," "every 3 months," etc. rather than losing the
+    # monthly alignment entirely.
     total_weeks = len(df)
-    tick_step = max(1, round(total_weeks / 13))
+    MAX_TICKS = 15
+    tick_step = 4
+    while total_weeks / tick_step > MAX_TICKS:
+        tick_step += 4
     tick_values = list(range(tick_step, total_weeks + 1, tick_step))
 
     return (
