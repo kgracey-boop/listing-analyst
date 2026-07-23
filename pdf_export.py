@@ -135,11 +135,15 @@ def _chart_svg(chart) -> str:
     return f'<div class="chart">{svg}</div>'
 
 
-def _section(title: str, body_html: str, page_break_before: bool = False) -> str:
+def _section(title: str, body_html: str, page_break_before: bool = False, keep_together: bool = False) -> str:
     if not body_html:
         return ""
-    classes = "section page-break" if page_break_before else "section"
-    return f'<section class="{classes}"><h2>{_esc(title)}</h2>{body_html}</section>'
+    classes = ["section"]
+    if page_break_before:
+        classes.append("page-break")
+    if keep_together:
+        classes.append("keep-together")
+    return f'<section class="{" ".join(classes)}"><h2>{_esc(title)}</h2>{body_html}</section>'
 
 
 def _section_enabled(section_toggles, key) -> bool:
@@ -207,7 +211,7 @@ def _viewer_overlap_section(comps, since_field, title) -> str:
     body = _table(["Address", "Status", "Price", "First Flagged", "Link"], rows, link_col=4)
     if len(comps) > MAX_COMP_ROWS:
         body += f'<p class="caption">Showing the {MAX_COMP_ROWS} most recently flagged, of {len(comps)} total.</p>'
-    return _section(title, body)
+    return _section(title, body, keep_together=True)
 
 
 CSS_TEMPLATE = """
@@ -280,6 +284,10 @@ h2 {{
 .section.page-break {{
     break-before: page;
     page-break-before: always;
+}}
+.section.keep-together {{
+    break-inside: avoid;
+    page-break-inside: avoid;
 }}
 
 .stat-grid {{
@@ -605,7 +613,7 @@ def build_pdf(
             body += _table(["Address", "List Price", "DOM", "$/sqft", "Link"], rows, link_col=4)
             if len(active_comps) > MAX_COMP_ROWS:
                 body += f'<p class="caption">Showing the {MAX_COMP_ROWS} closest in price to yours, of {len(active_comps)} active comps total.</p>'
-            sections.append(_section("Active Listings You're Competing With", body))
+            sections.append(_section("Active Listings You're Competing With", body, keep_together=True))
 
         # --------------------------------------- Pending listings (with links)
         # Sorted by expected closing date, soonest first — not price
@@ -636,7 +644,7 @@ def build_pdf(
             )
             if len(pending_comps) > MAX_COMP_ROWS:
                 body += f'<p class="caption">Showing the {MAX_COMP_ROWS} soonest to close, of {len(pending_comps)} pending comps total.</p>'
-            sections.append(_section("Pending Listings About to Close", body))
+            sections.append(_section("Pending Listings About to Close", body, keep_together=True))
 
         # ------------------------------------------------------ Closed comps
         closed_comps = [c for c in calc_comps if c.get("status") == "closed" and c.get("sold_price")]
@@ -668,7 +676,7 @@ def build_pdf(
                 for c in commented:
                     address = c.get("address") or "Unknown address"
                     body += f'<p class="caption">- {_esc(address)}: {_esc(c["concessions_comments"])}</p>'
-            sections.append(_section("Recently Closed Comps", body))
+            sections.append(_section("Recently Closed Comps", body, keep_together=True))
 
         # -------------------------------------------------- Viewer overlap
         if _section_enabled(section_toggles, "viewer_overlap"):
