@@ -35,8 +35,10 @@ BRAND = {
     "slate": "#444444",
     "mist": "#F9F9F9",
     # {mls_number} gets substituted in — swap this per agent's own site once
-    # this app supports more than one agent.
-    "search_url_template": "https://aprilaumanrealestate.com/search/#location_search_field={mls_number}",
+    # this app supports more than one agent. Confirmed working 2026-07-23:
+    # this exact path (no address slug/internal id needed) returns a
+    # filtered one-result search page for that MLS#.
+    "search_url_template": "https://aauman.cbadvantage.com/search-listings/mlnumber_{mls_number}/",
 }
 
 
