@@ -626,8 +626,9 @@ def build_pdf(
         closed_comps = [c for c in calc_comps if c.get("status") == "closed" and c.get("sold_price")]
         closed_comps.sort(key=lambda c: try_parse_date(c.get("close_date")) or try_parse_date("1900-01-01"), reverse=True)
         if closed_comps and _section_enabled(section_toggles, "market_comparison"):
+            shown_closed = closed_comps[:MAX_COMP_ROWS]
             rows = []
-            for c in closed_comps[:MAX_COMP_ROWS]:
+            for c in shown_closed:
                 psf = price_per_sqft(c.get("sold_price"), c.get("square_feet"))
                 orig = _fmt_money(c.get("original_list_price")) or "-"
                 sold = _fmt_money(c.get("sold_price")) or "-"
@@ -636,10 +637,21 @@ def build_pdf(
                     f"{orig} → {sold}",
                     c.get("days_on_market") if c.get("days_on_market") is not None else "-",
                     _fmt_money(psf) or "-",
+                    _fmt_money(c.get("concessions_amount")) or "-",
                 ])
-            body = _table(["Address", "Original → Sold", "DOM", "$/sqft"], rows)
+            body = _table(["Address", "Original → Sold", "DOM", "$/sqft", "Concessions"], rows)
             if len(closed_comps) > MAX_COMP_ROWS:
                 body += f'<p class="caption">Showing the {MAX_COMP_ROWS} most recent closings, of {len(closed_comps)} closed comps total.</p>'
+            # Comments as a caption list rather than a table column — free
+            # text varies too much in length to sit next to four tight
+            # numeric columns without overflowing or squeezing the rest
+            # unreadable, so only listing rows that actually have one.
+            commented = [c for c in shown_closed if c.get("concessions_comments")]
+            if commented:
+                body += '<p class="caption">Concessions notes:</p>'
+                for c in commented:
+                    address = c.get("address") or "Unknown address"
+                    body += f'<p class="caption">- {_esc(address)}: {_esc(c["concessions_comments"])}</p>'
             sections.append(_section("Recently Closed Comps", body))
 
         # -------------------------------------------------- Viewer overlap
