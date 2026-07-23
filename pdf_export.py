@@ -444,6 +444,9 @@ def build_pdf(
 
     # ------------------------------------------------- Market comparison
     if calc_comps:
+        median_psf = median_comp_price_per_sqft(calc_comps)
+
+        # -------------------------------------------------- Core stats
         parts = []
         row_count = len(calc_comps)
         stats = compute_absorption(calc_comps)
@@ -461,6 +464,45 @@ def build_pdf(
             parts.append(f'<p class="body-line">Months of supply: {stats["months_of_supply"]}</p>')
             parts.append(f'<p class="caption">{_esc(_absorption_caption(stats))}</p>')
 
+        if median_psf:
+            subject_psf = price_per_sqft(merged.get("list_price"), merged.get("square_feet"))
+            you = _fmt_money(subject_psf) if subject_psf else "unknown"
+            parts.append(f'<p class="body-line">Price per sq ft: you\'re at {_esc(you)}, comps median {_esc(_fmt_money(median_psf))}</p>')
+
+        dom_stats = dom_benchmark(calc_comps)
+        if dom_stats["active_median_dom"] or dom_stats["pending_median_dom"]:
+            if dom_stats["pending_median_dom"]:
+                parts.append(
+                    f'<p class="caption">Comps that went pending typically did so by day {dom_stats["pending_median_dom"]} — '
+                    'a rough benchmark for when a listing \'should\' go under contract, if it\'s going to.</p>'
+                )
+            if dom_stats["active_median_dom"]:
+                parts.append(f'<p class="caption">Comps still active have a median of {dom_stats["active_median_dom"]} days on market so far.</p>')
+            subject_dom = merged.get("days_on_market")
+            if subject_dom and dom_stats["pending_median_dom"]:
+                diff = subject_dom - dom_stats["pending_median_dom"]
+                if diff > 0:
+                    parts.append(f'<p class="caption">You\'re at {subject_dom} days — {diff} days past that benchmark.</p>')
+                else:
+                    parts.append(f'<p class="caption">You\'re at {subject_dom} days — still within that typical window.</p>')
+
+        scope = data_scope_summary(calc_comps)
+        scope_parts = []
+        if scope["geography"]:
+            scope_parts.append(scope["geography"])
+        if scope["property_types"]:
+            scope_parts.append(", ".join(scope["property_types"]))
+        if scope["price_range"]:
+            scope_parts.append(f"{_fmt_money(scope['price_range'][0])} - {_fmt_money(scope['price_range'][1])} observed")
+        if scope["sqft_range"]:
+            scope_parts.append(f"{scope['sqft_range'][0]:,}-{scope['sqft_range'][1]:,} sqft observed")
+        if scope_parts:
+            parts.append(f'<p class="caption">Data scope: {_esc(" · ".join(scope_parts))}</p>')
+
+        if _section_enabled(section_toggles, "market_comparison"):
+            sections.append(_section("Market Comparison", "".join(parts)))
+
+        # ------------------------------------- By property type & subdivision
         by_type = absorption_by_property_type(calc_comps)
         nc_stats = compute_new_construction_absorption(calc_comps)
         subject_bucket = bucket_property_type(profile.get("property_type")) if profile.get("property_type") else None
@@ -500,78 +542,47 @@ def build_pdf(
         # Side by side when both computed — same chart type (months-of-supply
         # bars), just different breakdowns, so pairing them reads as one
         # comparison instead of two stacked, near-identical-looking charts.
-        parts.append(_chart_row(by_type_col, zip_col))
+        breakdown_parts = [_chart_row(by_type_col, zip_col)]
 
         if len(bars) > 1:
             if has_new_construction:
-                parts.append(
+                breakdown_parts.append(
                     '<p class="caption">New Construction reflects time from listing to going under contract, not closing — '
                     'this accounts for build/completion time that doesn\'t apply to resale homes.</p>'
                 )
                 nc_days = median_list_to_contract_days(calc_comps, new_construction=True)
                 resale_days = median_list_to_contract_days(calc_comps, new_construction=False)
                 if nc_days is not None:
-                    parts.append(f'<p class="caption">New Construction: {nc_days:.0f} days from list to contract</p>')
+                    breakdown_parts.append(f'<p class="caption">New Construction: {nc_days:.0f} days from list to contract</p>')
                 if resale_days is not None:
-                    parts.append(f'<p class="caption">Resale: {resale_days:.0f} days from list to contract</p>')
+                    breakdown_parts.append(f'<p class="caption">Resale: {resale_days:.0f} days from list to contract</p>')
 
             if skipped:
-                parts.append(f'<p class="caption">Not enough sold data yet to calculate a rate for: {_esc(", ".join(skipped))}.</p>')
+                breakdown_parts.append(f'<p class="caption">Not enough sold data yet to calculate a rate for: {_esc(", ".join(skipped))}.</p>')
 
-        if profile.get("property_type"):
+        if _section_enabled(section_toggles, "property_type_breakdown"):
+            sections.append(_section("By Property Type & Subdivision", "".join(breakdown_parts)))
+
+        # ------------------------------------------------------ Weekly contracts
+        if profile.get("property_type") and _section_enabled(section_toggles, "weekly_contracts"):
             weekly = weekly_contracts(calc_comps, profile["property_type"])
             if any(w["count"] for w in weekly):
                 bucket_label = bucket_property_type(profile["property_type"])
-                parts.append(f'<p class="body-line">Weekly contracts — {_esc(bucket_label)} (last ~2 years):</p>')
-                parts.append(_chart_svg(weekly_contracts_chart(weekly)))
+                weekly_body = f'<p class="body-line">Weekly contracts — {_esc(bucket_label)} (last ~2 years):</p>'
+                weekly_body += _chart_svg(weekly_contracts_chart(weekly))
+                sections.append(_section("Weekly Contracts", weekly_body))
 
-        median_psf = median_comp_price_per_sqft(calc_comps)
-        if median_psf:
-            subject_psf = price_per_sqft(merged.get("list_price"), merged.get("square_feet"))
-            you = _fmt_money(subject_psf) if subject_psf else "unknown"
-            parts.append(f'<p class="body-line">Price per sq ft: you\'re at {_esc(you)}, comps median {_esc(_fmt_money(median_psf))}</p>')
-
-        dom_stats = dom_benchmark(calc_comps)
-        if dom_stats["active_median_dom"] or dom_stats["pending_median_dom"]:
-            if dom_stats["pending_median_dom"]:
-                parts.append(
-                    f'<p class="caption">Comps that went pending typically did so by day {dom_stats["pending_median_dom"]} — '
-                    'a rough benchmark for when a listing \'should\' go under contract, if it\'s going to.</p>'
-                )
-            if dom_stats["active_median_dom"]:
-                parts.append(f'<p class="caption">Comps still active have a median of {dom_stats["active_median_dom"]} days on market so far.</p>')
-            subject_dom = merged.get("days_on_market")
-            if subject_dom and dom_stats["pending_median_dom"]:
-                diff = subject_dom - dom_stats["pending_median_dom"]
-                if diff > 0:
-                    parts.append(f'<p class="caption">You\'re at {subject_dom} days — {diff} days past that benchmark.</p>')
-                else:
-                    parts.append(f'<p class="caption">You\'re at {subject_dom} days — still within that typical window.</p>')
-
-        scope = data_scope_summary(calc_comps)
-        scope_parts = []
-        if scope["geography"]:
-            scope_parts.append(scope["geography"])
-        if scope["property_types"]:
-            scope_parts.append(", ".join(scope["property_types"]))
-        if scope["price_range"]:
-            scope_parts.append(f"{_fmt_money(scope['price_range'][0])} - {_fmt_money(scope['price_range'][1])} observed")
-        if scope["sqft_range"]:
-            scope_parts.append(f"{scope['sqft_range'][0]:,}-{scope['sqft_range'][1]:,} sqft observed")
-        if scope_parts:
-            parts.append(f'<p class="caption">Data scope: {_esc(" · ".join(scope_parts))}</p>')
-
-        scoped_comps = filter_by_subdivision(calc_comps, profile.get("subdivision")) if comps_scope == "subdivision" else calc_comps
-        chart_comps = filter_recent_closed(scoped_comps, months=solds_window_months)
-        market_rate_price = median_psf * merged["square_feet"] if median_psf and merged.get("square_feet") else None
-        closed_median_dom = median_comp_days_on_market([c for c in chart_comps if c.get("status") == "closed"])
-        parts.append(_chart_svg(price_position_chart(
-            chart_comps, merged.get("list_price"), merged.get("days_on_market"),
-            market_rate_price, closed_median_dom,
-        )))
-
-        if _section_enabled(section_toggles, "market_comparison"):
-            sections.append(_section("Market Comparison", "".join(parts)))
+        # ------------------------------------------------------- Price position
+        if _section_enabled(section_toggles, "price_position"):
+            scoped_comps = filter_by_subdivision(calc_comps, profile.get("subdivision")) if comps_scope == "subdivision" else calc_comps
+            chart_comps = filter_recent_closed(scoped_comps, months=solds_window_months)
+            market_rate_price = median_psf * merged["square_feet"] if median_psf and merged.get("square_feet") else None
+            closed_median_dom = median_comp_days_on_market([c for c in chart_comps if c.get("status") == "closed"])
+            position_body = _chart_svg(price_position_chart(
+                chart_comps, merged.get("list_price"), merged.get("days_on_market"),
+                market_rate_price, closed_median_dom,
+            ))
+            sections.append(_section("Price Position", position_body))
 
         # ---------------------------------------- Active listings (with links)
         active_comps = [c for c in calc_comps if c.get("status") == "active" and c.get("list_price")]

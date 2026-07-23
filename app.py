@@ -1260,7 +1260,7 @@ def render_review_stage(slug, profile, history):
                 )
 
                 section_toggles["market_comparison"] = st.checkbox(
-                    "Include stats & absorption charts below in printed report",
+                    "Include core stats below (totals, months of supply, price/sqft, DOM, data scope) in printed report",
                     value=True, key="section_toggle_market_comparison",
                 )
                 stats = compute_absorption(calc_comps)
@@ -1281,8 +1281,17 @@ def render_review_stage(slug, profile, history):
                     st.caption(absorption_caption(stats))
                 subject_bucket = bucket_property_type(profile.get("property_type")) if profile.get("property_type") else None
                 computed["subject_property_type_bucket"] = subject_bucket
+                section_toggles["property_type_breakdown"] = st.checkbox(
+                    "Include property type & subdivision charts below in printed report",
+                    value=True, key="section_toggle_property_type_breakdown",
+                )
                 render_property_type_breakdown(calc_comps, subject_bucket)
                 render_zip_vs_subdivision_comparison(calc_comps, profile.get("subdivision"), profile.get("property_type"))
+
+                section_toggles["weekly_contracts"] = st.checkbox(
+                    "Include weekly contracts chart below in printed report",
+                    value=True, key="section_toggle_weekly_contracts",
+                )
                 render_weekly_contracts_chart(calc_comps, profile.get("property_type"))
 
                 median_psf = median_comp_price_per_sqft(calc_comps)
@@ -1315,6 +1324,10 @@ def render_review_stage(slug, profile, history):
 
                 render_data_scope(calc_comps, stats)
 
+                section_toggles["price_position"] = st.checkbox(
+                    "Include price position chart below in printed report",
+                    value=True, key="section_toggle_price_position",
+                )
                 st.write("**Sample chart** — price vs. days on market for active/pending/closed comps *(prototype)*:")
                 scope_col, recency_col = st.columns(2)
                 with scope_col:
