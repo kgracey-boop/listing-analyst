@@ -6,3 +6,4 @@ psycopg[binary]
 altair
 pandas
 vl-convert-python
+streamlit-sortables

@@ -8,6 +8,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx
+from streamlit_sortables import sort_items
 
 # Bridge Streamlit Cloud's secrets manager into os.environ, since the rest of
 # this app reads config via os.environ (works locally via .env too). No-op
@@ -325,6 +326,30 @@ DEFAULT_SOLDS_WINDOW = "Last 3 months"
 
 COMPS_SCOPE_OPTIONS = {"All": "all", "Subdivision only": "subdivision"}
 DEFAULT_COMPS_SCOPE = "All"
+
+# Human-readable labels for the drag-to-reorder lists on the Review page --
+# keys here must match pdf_export.py's DEFAULT_SUBJECT_ORDER/DEFAULT_MARKET_ORDER
+# exactly, since these are the same keys section_toggles already uses.
+SUBJECT_SECTION_LABELS = {
+    "key_numbers": "Key Numbers",
+    "price_history": "Price History",
+    "price_bands": "Showings by Price Band",
+    "feedback": "Buyer Feedback",
+    "online_traffic": "Online Traffic",
+    "agent_commentary": "Agent Commentary",
+}
+MARKET_SECTION_LABELS = {
+    "market_comparison": "Market Comparison",
+    "property_type_breakdown": "By Property Type & Subdivision",
+    "weekly_contracts": "Weekly Contracts",
+    "price_position": "Price Position",
+    "active_listings": "Active Listings",
+    "pending_listings": "Pending Listings",
+    "closed_comps": "Recently Closed Comps",
+    "viewer_overlap": "Viewer Overlap",
+}
+SUBJECT_LABEL_TO_KEY = {label: key for key, label in SUBJECT_SECTION_LABELS.items()}
+MARKET_LABEL_TO_KEY = {label: key for key, label in MARKET_SECTION_LABELS.items()}
 
 
 def comps_by_status(comparable_listings: list) -> dict:
@@ -1415,10 +1440,31 @@ def render_review_stage(slug, profile, history):
 
     render_debug_panel(merged, profile, st.session_state["known_comps"], st.session_state["known_feedback"], computed)
 
+    with st.expander("Reorder printed report sections"):
+        st.caption(
+            "Drag to change the order sections print in — Your Listing and The Market "
+            "reorder independently, so a section can't be dragged from one group into the other."
+        )
+        st.write("Your Listing:")
+        subject_labels = st.session_state.get("subject_section_order") or list(SUBJECT_SECTION_LABELS.values())
+        st.session_state["subject_section_order"] = sort_items(subject_labels, key="subject_section_sortable")
+
+        st.write("The Market:")
+        market_labels = st.session_state.get("market_section_order") or list(MARKET_SECTION_LABELS.values())
+        st.session_state["market_section_order"] = sort_items(market_labels, key="market_section_sortable")
+
     st.subheader("Save & export")
     st.caption("Saved — the next report for this property will compare against this one. "
                "Each section above has its own \"Include in printed report\" checkbox.")
 
+    pdf_subject_order = [
+        SUBJECT_LABEL_TO_KEY[label] for label in st.session_state.get("subject_section_order", [])
+        if label in SUBJECT_LABEL_TO_KEY
+    ]
+    pdf_market_order = [
+        MARKET_LABEL_TO_KEY[label] for label in st.session_state.get("market_section_order", [])
+        if label in MARKET_LABEL_TO_KEY
+    ]
     pdf_calc_comps = (
         filter_by_price_band(active_for_calculation(st.session_state["known_comps"]), price_band)
         if st.session_state["known_comps"] else None
@@ -1437,6 +1483,8 @@ def render_review_stage(slug, profile, history):
             st.session_state.get("preparer_contact"),
             pdf_comps_scope,
             section_toggles,
+            pdf_subject_order,
+            pdf_market_order,
         ),
         file_name=f"{slug}-report-{date.today().isoformat()}.pdf",
         mime="application/pdf",
