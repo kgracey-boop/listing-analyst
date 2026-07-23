@@ -232,20 +232,24 @@ def absorption_chart(bucket_stats: list):
 def weekly_contracts_chart(weekly_counts: list):
     """Bar chart: count of comps (already filtered to the subject's own
     property type) that went under contract each week, over roughly the
-    last 2 years. Plotted as a right-justified relative timeline (weeks
-    back from now, most recent on the right) rather than calendar dates --
-    a continuous date axis crammed with ~104 weekly bars couldn't
-    guarantee visible gaps between bars at that density, so adjacent
-    weeks visually fused together. An ordinal "weeks back" axis gives
-    every bar an even, guaranteed band width instead, regardless of how
-    many weeks are plotted. Tooltip-only, no direct labels — with up to
-    ~104 bars, labeling every one would be unreadable clutter rather than
-    a helpful figure. Returns None if there's nothing to plot."""
+    last year. Plotted as a right-justified relative timeline (weeks back
+    from now, most recent on the right) rather than calendar dates -- an
+    ordinal "weeks back" axis gives every bar an even, guaranteed band
+    width, unlike a continuous date axis at this density. Explicit,
+    evenly-spaced tick values (every ~4th week) instead of Vega-Lite's
+    automatic label-thinning -- left to its own heuristic, it fell back to
+    showing every other (oddly-numbered) tick, which read as cluttered
+    rather than clean. Tooltip-only, no direct bar labels. Returns None if
+    there's nothing to plot."""
     if not weekly_counts:
         return None
 
     df = pd.DataFrame(weekly_counts)
     width = max(600, len(df) * 8)
+
+    total_weeks = len(df)
+    tick_step = max(1, round(total_weeks / 13))
+    tick_values = list(range(tick_step, total_weeks + 1, tick_step))
 
     return (
         alt.Chart(df)
@@ -253,7 +257,7 @@ def weekly_contracts_chart(weekly_counts: list):
         .encode(
             x=alt.X(
                 "weeks_back:O", title="Weeks back", sort="descending",
-                axis=alt.Axis(labelOverlap=True),
+                axis=alt.Axis(values=tick_values),
             ),
             y=alt.Y("count:Q", title="Contracts that week"),
             tooltip=[

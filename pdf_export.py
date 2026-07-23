@@ -626,7 +626,7 @@ def build_pdf(
             weekly = weekly_contracts(calc_comps, profile["property_type"])
             if any(w["count"] for w in weekly):
                 bucket_label = bucket_property_type(profile["property_type"])
-                weekly_body = f'<p class="body-line">Weekly contracts — {_esc(bucket_label)} (last ~2 years):</p>'
+                weekly_body = f'<p class="body-line">Weekly contracts — {_esc(bucket_label)} (last ~1 year):</p>'
                 weekly_body += _chart_svg(weekly_contracts_chart(weekly))
                 market_sections["weekly_contracts"] = _section("Weekly Contracts", weekly_body)
 

@@ -222,13 +222,16 @@ def filter_by_price_band(comparable_listings: list, price_band) -> list:
     return kept
 
 
-WEEKLY_CONTRACTS_WEEKS = 104  # roughly 2 years
+WEEKLY_CONTRACTS_WEEKS = 52  # roughly 1 year -- 104 (~2 years) made for a
+# cluttered chart even with an ordinal axis: that many bars forced the
+# automatic label-thinning to fall back to showing every other tick
+# (an uneven, oddly-numbered set), not a real fusion bug in the data itself.
 
 
 def weekly_contracts(comparable_listings: list, subject_property_type: str, weeks: int = WEEKLY_CONTRACTS_WEEKS, as_of=None) -> list:
     """
     Count of comps — filtered to the subject's own property type bucket —
-    that went under contract each week, over the trailing ~2 years. A
+    that went under contract each week, over the trailing ~1 year. A
     market-pulse view of contract velocity, not a comparison metric like
     the absorption charts: townhomes and single-family buyers can react to
     rate moves on very different timelines, so blending them here would

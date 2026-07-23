@@ -276,7 +276,7 @@ def render_zip_vs_subdivision_comparison(comparable_listings: list, subject_subd
 
 def render_weekly_contracts_chart(comparable_listings: list, subject_property_type: str):
     """Weekly contract-signing pace for the subject's own property type,
-    over roughly the last 2 years — a market-pulse view, not a comparison,
+    over roughly the last year — a market-pulse view, not a comparison,
     so it's filtered narrower than the absorption charts on purpose:
     townhome and single-family buyers can react to rate moves on very
     different timelines."""
@@ -287,7 +287,7 @@ def render_weekly_contracts_chart(comparable_listings: list, subject_property_ty
         return  # no contract-date data yet for this property type
 
     bucket = bucket_property_type(subject_property_type)
-    st.write(f"Weekly contracts — {bucket} (last ~2 years):")
+    st.write(f"Weekly contracts — {bucket} (last ~1 year):")
     chart = weekly_contracts_chart(weekly)
     if chart is not None:
         st.altair_chart(chart, use_container_width=True)
