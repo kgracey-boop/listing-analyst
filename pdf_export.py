@@ -164,10 +164,13 @@ def _chart_row(*column_htmls) -> str:
     return f'<div class="chart-row">{cols_html}</div>'
 
 
-def _table(headers, rows, link_col=None) -> str:
+def _table(headers, rows, link_col=None, highlight_cols=None) -> str:
     """rows: list of lists of already-escaped cell HTML strings. link_col
     (if given) is the index whose cell is wrapped in an <a> using the row's
-    last element as the href."""
+    last element as the href. highlight_cols (if given) is a set of column
+    indices to visually call out, e.g. the dates that justify a sort order
+    the reader might not otherwise notice."""
+    highlight_cols = highlight_cols or set()
     head = "".join(f"<th>{_esc(h)}</th>" for h in headers)
     body_rows = []
     for row in rows:
@@ -177,6 +180,8 @@ def _table(headers, rows, link_col=None) -> str:
         for i, value in enumerate(values):
             if link_col is not None and i == link_col and url:
                 cells.append(f'<td><a href="{_esc(url)}">{_esc(value)}</a></td>')
+            elif i in highlight_cols:
+                cells.append(f'<td class="highlight-cell">{_esc(value)}</td>')
             else:
                 cells.append(f"<td>{_esc(value)}</td>")
         body_rows.append(f"<tr>{''.join(cells)}</tr>")
@@ -326,6 +331,11 @@ table.comp-table td {{
     border-bottom: 1px solid #eee;
 }}
 table.comp-table a {{ color: {navy}; text-decoration: underline; }}
+table.comp-table td.highlight-cell {{
+    background: rgba(244, 180, 0, 0.2);
+    font-weight: 600;
+    color: {navy};
+}}
 """
 
 
@@ -582,8 +592,12 @@ def build_pdf(
             sections.append(_section("Active Listings You're Competing With", body))
 
         # --------------------------------------- Pending listings (with links)
+        # Sorted by expected closing date, soonest first — not price
+        # proximity like Active — since the point of this table is watching
+        # what's about to close ahead of you. Comps with no stated closing
+        # date sort to the end rather than falsely reading as "soonest."
         pending_comps = [c for c in calc_comps if c.get("status") == "pending" and c.get("list_price")]
-        pending_comps.sort(key=lambda c: abs(c["list_price"] - subject_price) if subject_price else 0)
+        pending_comps.sort(key=lambda c: try_parse_date(c.get("close_date")) or try_parse_date("9999-12-31"))
         if pending_comps and _section_enabled(section_toggles, "market_comparison"):
             rows = []
             for c in pending_comps[:MAX_COMP_ROWS]:
@@ -594,13 +608,18 @@ def build_pdf(
                     _fmt_money(c.get("list_price")) or "-",
                     c.get("days_on_market") if c.get("days_on_market") is not None else "-",
                     _fmt_money(psf) or "-",
+                    c.get("contract_date") or "-",
+                    c.get("close_date") or "-",
                     "View" if url else "-",
                     url,
                 ])
-            body = '<p class="caption">Tap "View" to see that listing\'s current search result — worth watching since it\'s about to close.</p>'
-            body += _table(["Address", "List Price", "DOM", "$/sqft", "Link"], rows, link_col=4)
+            body = '<p class="caption">Sorted by expected closing date, soonest first. Tap "View" to see that listing\'s current search result.</p>'
+            body += _table(
+                ["Address", "List Price", "DOM", "$/sqft", "Contract Date", "Expected Close", "Link"],
+                rows, link_col=6, highlight_cols={4, 5},
+            )
             if len(pending_comps) > MAX_COMP_ROWS:
-                body += f'<p class="caption">Showing the {MAX_COMP_ROWS} closest in price to yours, of {len(pending_comps)} pending comps total.</p>'
+                body += f'<p class="caption">Showing the {MAX_COMP_ROWS} soonest to close, of {len(pending_comps)} pending comps total.</p>'
             sections.append(_section("Pending Listings About to Close", body))
 
         # ------------------------------------------------------ Closed comps
