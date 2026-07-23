@@ -71,8 +71,10 @@ def _css_str_esc(value) -> str:
 
 
 def _build_listing_url(link_or_reference):
-    """MLS# -> a search link on the agent's own site. Only meaningful for
-    active listings -- pending/closed ones won't show up in an active search."""
+    """MLS# -> a search link on the agent's own site. Confirmed 2026-07-23:
+    resolves for active and pending listings, but not closed ones -- the
+    public IDX site doesn't index sold data, only agent-side MLS access
+    does, so don't build this link for closed comps."""
     import re
 
     if not link_or_reference:
@@ -578,6 +580,28 @@ def build_pdf(
             if len(active_comps) > MAX_COMP_ROWS:
                 body += f'<p class="caption">Showing the {MAX_COMP_ROWS} closest in price to yours, of {len(active_comps)} active comps total.</p>'
             sections.append(_section("Active Listings You're Competing With", body))
+
+        # --------------------------------------- Pending listings (with links)
+        pending_comps = [c for c in calc_comps if c.get("status") == "pending" and c.get("list_price")]
+        pending_comps.sort(key=lambda c: abs(c["list_price"] - subject_price) if subject_price else 0)
+        if pending_comps and _section_enabled(section_toggles, "market_comparison"):
+            rows = []
+            for c in pending_comps[:MAX_COMP_ROWS]:
+                psf = price_per_sqft(c.get("list_price"), c.get("square_feet"))
+                url = _build_listing_url(c.get("link_or_reference"))
+                rows.append([
+                    c.get("address") or "Unknown address",
+                    _fmt_money(c.get("list_price")) or "-",
+                    c.get("days_on_market") if c.get("days_on_market") is not None else "-",
+                    _fmt_money(psf) or "-",
+                    "View" if url else "-",
+                    url,
+                ])
+            body = '<p class="caption">Tap "View" to see that listing\'s current search result — worth watching since it\'s about to close.</p>'
+            body += _table(["Address", "List Price", "DOM", "$/sqft", "Link"], rows, link_col=4)
+            if len(pending_comps) > MAX_COMP_ROWS:
+                body += f'<p class="caption">Showing the {MAX_COMP_ROWS} closest in price to yours, of {len(pending_comps)} pending comps total.</p>'
+            sections.append(_section("Pending Listings About to Close", body))
 
         # ------------------------------------------------------ Closed comps
         closed_comps = [c for c in calc_comps if c.get("status") == "closed" and c.get("sold_price")]
