@@ -39,8 +39,11 @@ from market_stats import (
     comp_price_reduction_stats,
     compute_absorption,
     compute_new_construction_absorption,
+    comp_price,
     data_scope_summary,
+    default_price_band,
     dom_benchmark,
+    filter_by_price_band,
     filter_by_subdivision,
     filter_recent_closed,
     match_price_band,
@@ -1034,6 +1037,40 @@ def render_review_stage(slug, profile, history):
             st.session_state["known_feedback"], merged["feedback"]
         )
 
+    # Comp price-range scope — applied to every comp-based stat/chart below
+    # (Price History's price-drop rates, Market Comparison's absorption/
+    # charts, and the PDF's comp tables), not just one chart. A CSV pull can
+    # cover an entire MLS region; without this, stats like "% price drop
+    # before pending" get diluted across comps that have nothing to do with
+    # this listing. Auto-set from list price so there's a sane default out
+    # of the box, but it's the agent's call to widen or narrow it.
+    price_band = None
+    known_comps_for_band = st.session_state["known_comps"]
+    if known_comps_for_band:
+        comps_with_price = [c for c in active_for_calculation(known_comps_for_band) if comp_price(c) is not None]
+        observed_prices = [comp_price(c) for c in comps_with_price]
+        if comps_with_price and min(observed_prices) != max(observed_prices):
+            slider_min, slider_max = float(min(observed_prices)), float(max(observed_prices))
+            auto_band = default_price_band(merged.get("list_price"))
+            default_low = max(slider_min, float(auto_band[0])) if auto_band else slider_min
+            default_high = min(slider_max, float(auto_band[1])) if auto_band else slider_max
+            if default_low > default_high:
+                default_low, default_high = slider_min, slider_max
+            st.caption(
+                "Comp price range — auto-set to ±30% of your list price, applied to every comp-based "
+                f"stat and chart below. {len(comps_with_price)} priced comps available; widen or narrow "
+                "if this feels off."
+            )
+            band_low, band_high = st.slider(
+                "Comp price range",
+                min_value=slider_min, max_value=slider_max,
+                value=(default_low, default_high), step=5000.0,
+                key="comp_price_band", label_visibility="collapsed",
+            )
+            price_band = (band_low, band_high)
+            in_band_count = len(filter_by_price_band(comps_with_price, price_band))
+            st.caption(f"{in_band_count} of {len(comps_with_price)} comps fall in this range.")
+
     with st.expander("Basic facts", expanded=True, key="pdfsection-basic-facts"):
         st.caption("Always included in the printed report as Key Numbers.")
         merged["list_price"] = st.number_input("List price", value=float(merged.get("list_price") or 0), step=1000.0)
@@ -1073,6 +1110,7 @@ def render_review_stage(slug, profile, history):
             st.caption("No price history found in the uploaded reports.")
 
         calc_comps_for_reductions = active_for_calculation(st.session_state["known_comps"]) if st.session_state["known_comps"] else []
+        calc_comps_for_reductions = filter_by_price_band(calc_comps_for_reductions, price_band)
         if calc_comps_for_reductions:
             comp_reduction_stats = comp_price_reduction_stats(calc_comps_for_reductions)
             computed["comp_price_reduction_stats"] = comp_reduction_stats
@@ -1203,6 +1241,11 @@ def render_review_stage(slug, profile, history):
                 excluded_count = len(known_comps) - len(calc_comps)
                 if excluded_count:
                     st.caption(f"{excluded_count} comp{'s' if excluded_count != 1 else ''} excluded from the numbers below.")
+
+                out_of_band_count = len(calc_comps) - len(filter_by_price_band(calc_comps, price_band))
+                calc_comps = filter_by_price_band(calc_comps, price_band)
+                if out_of_band_count:
+                    st.caption(f"{out_of_band_count} more outside the comp price range above, also left out of the numbers below.")
 
                 st.caption("Include in printed report, based on the comps above:")
                 comp_table_cols = st.columns(3)
@@ -1363,7 +1406,10 @@ def render_review_stage(slug, profile, history):
     st.caption("Saved — the next report for this property will compare against this one. "
                "Each section above has its own \"Include in printed report\" checkbox.")
 
-    pdf_calc_comps = active_for_calculation(st.session_state["known_comps"]) if st.session_state["known_comps"] else None
+    pdf_calc_comps = (
+        filter_by_price_band(active_for_calculation(st.session_state["known_comps"]), price_band)
+        if st.session_state["known_comps"] else None
+    )
     pdf_solds_window_label = st.session_state.get("solds_window_label", DEFAULT_SOLDS_WINDOW)
     pdf_solds_window_months = SOLDS_WINDOW_OPTIONS.get(pdf_solds_window_label, SOLDS_WINDOW_OPTIONS[DEFAULT_SOLDS_WINDOW])
     pdf_scope_label = st.session_state.get("comps_scope_label", DEFAULT_COMPS_SCOPE)

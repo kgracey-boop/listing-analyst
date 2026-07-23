@@ -184,6 +184,44 @@ def filter_by_subdivision(comparable_listings: list, subject_subdivision: str) -
     return [c for c in comparable_listings if _normalize_subdivision(c.get("subdivision")) == target]
 
 
+def comp_price(comp: dict):
+    """The one price that matters for scoping a comp against the subject:
+    sold price once closed (that's the real outcome), list price otherwise.
+    None if neither is known."""
+    return comp.get("sold_price") if comp.get("status") == "closed" else comp.get("list_price")
+
+
+def default_price_band(list_price, spread: float = 0.3):
+    """A starting price range around the subject's own list price -- e.g.
+    $375,000 at the default 30% spread gives ~$262,000-$488,000. A CSV pull
+    covering an entire MLS region (starter condos to multi-million-dollar
+    estates) isn't a meaningful comp set for one specific listing no matter
+    how big it is; this gives every report a sane default scope out of the
+    box, adjustable in the UI rather than requiring a re-pull upstream.
+    Rounded to the nearest $1,000 since exact-cent precision here is false
+    confidence. Returns None if list_price isn't known -- nothing sensible
+    to center a band on."""
+    if not list_price:
+        return None
+    return (round(list_price * (1 - spread), -3), round(list_price * (1 + spread), -3))
+
+
+def filter_by_price_band(comparable_listings: list, price_band) -> list:
+    """Keeps only comps whose price (see comp_price()) falls within
+    price_band = (low, high). price_band=None means no filtering. A comp
+    with no price at all is dropped rather than assumed in-range, since
+    there's no way to judge whether it belongs."""
+    if price_band is None:
+        return list(comparable_listings)
+    low, high = price_band
+    kept = []
+    for c in comparable_listings:
+        price = comp_price(c)
+        if price is not None and low <= price <= high:
+            kept.append(c)
+    return kept
+
+
 WEEKLY_CONTRACTS_WEEKS = 104  # roughly 2 years
 
 
