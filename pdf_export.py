@@ -135,10 +135,11 @@ def _chart_svg(chart) -> str:
     return f'<div class="chart">{svg}</div>'
 
 
-def _section(title: str, body_html: str) -> str:
+def _section(title: str, body_html: str, page_break_before: bool = False) -> str:
     if not body_html:
         return ""
-    return f'<section class="section"><h2>{_esc(title)}</h2>{body_html}</section>'
+    classes = "section page-break" if page_break_before else "section"
+    return f'<section class="{classes}"><h2>{_esc(title)}</h2>{body_html}</section>'
 
 
 def _section_enabled(section_toggles, key) -> bool:
@@ -275,6 +276,10 @@ h2 {{
 
 .section {{
     margin-bottom: 7mm;
+}}
+.section.page-break {{
+    break-before: page;
+    page-break-before: always;
 }}
 
 .stat-grid {{
@@ -435,7 +440,7 @@ def build_pdf(
                     f'(usable data for {trend["months_with_data"]} of the last 12 months, need at least {MIN_MONTHS_WITH_DATA}).</p>'
                 )
 
-        sections.append(_section("Price History", "".join(parts)))
+        sections.append(_section("Price History", "".join(parts), page_break_before=True))
 
     # ------------------------------------------------- Market comparison
     if calc_comps:
@@ -572,7 +577,7 @@ def build_pdf(
         active_comps = [c for c in calc_comps if c.get("status") == "active" and c.get("list_price")]
         subject_price = merged.get("list_price")
         active_comps.sort(key=lambda c: abs(c["list_price"] - subject_price) if subject_price else 0)
-        if active_comps and _section_enabled(section_toggles, "market_comparison"):
+        if active_comps and _section_enabled(section_toggles, "active_listings"):
             rows = []
             for c in active_comps[:MAX_COMP_ROWS]:
                 psf = price_per_sqft(c.get("list_price"), c.get("square_feet"))
@@ -598,7 +603,7 @@ def build_pdf(
         # date sort to the end rather than falsely reading as "soonest."
         pending_comps = [c for c in calc_comps if c.get("status") == "pending" and c.get("list_price")]
         pending_comps.sort(key=lambda c: try_parse_date(c.get("close_date")) or try_parse_date("9999-12-31"))
-        if pending_comps and _section_enabled(section_toggles, "market_comparison"):
+        if pending_comps and _section_enabled(section_toggles, "pending_listings"):
             rows = []
             for c in pending_comps[:MAX_COMP_ROWS]:
                 psf = price_per_sqft(c.get("list_price"), c.get("square_feet"))
@@ -625,7 +630,7 @@ def build_pdf(
         # ------------------------------------------------------ Closed comps
         closed_comps = [c for c in calc_comps if c.get("status") == "closed" and c.get("sold_price")]
         closed_comps.sort(key=lambda c: try_parse_date(c.get("close_date")) or try_parse_date("1900-01-01"), reverse=True)
-        if closed_comps and _section_enabled(section_toggles, "market_comparison"):
+        if closed_comps and _section_enabled(section_toggles, "closed_comps"):
             shown_closed = closed_comps[:MAX_COMP_ROWS]
             rows = []
             for c in shown_closed:
@@ -655,12 +660,12 @@ def build_pdf(
             sections.append(_section("Recently Closed Comps", body))
 
         # -------------------------------------------------- Viewer overlap
-        if _section_enabled(section_toggles, "market_comparison"):
+        if _section_enabled(section_toggles, "viewer_overlap"):
             sections.append(_viewer_overlap_section(also_viewed_comps(calc_comps), "also_viewed_since", "People Who Viewed Your Listing Also Viewed"))
             sections.append(_viewer_overlap_section(also_saved_comps(calc_comps), "also_saved_since", "People Who Saved Your Listing Also Saved"))
 
     # ------------------------------------------------------------ Price bands
-    if merged.get("price_bands") and _section_enabled(section_toggles, "market_comparison"):
+    if merged.get("price_bands") and _section_enabled(section_toggles, "price_bands"):
         band = match_price_band(merged.get("list_price"), merged["price_bands"])
         sections.append(_section("Showings by Price Band", _chart_svg(price_band_chart(merged["price_bands"], band))))
 

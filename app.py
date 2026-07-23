@@ -1194,11 +1194,6 @@ def render_review_stage(slug, profile, history):
     known_comps = st.session_state["known_comps"]
     if known_comps or merged["price_bands"]:
         with st.expander("Market comparison", key="pdfsection-market-comparison"):
-            section_toggles["market_comparison"] = st.checkbox(
-                "Include market comparison in printed report "
-                "(comps, absorption, active/closed listings, viewer overlap, price bands)",
-                value=True, key="section_toggle_market_comparison",
-            )
             if known_comps:
                 st.write("Comparable listings — check Exclude on any comp that isn't a fair comparison (e.g. a unique property) to leave it out of the numbers below:")
                 known_comps = render_comps_editor(known_comps)
@@ -1209,6 +1204,22 @@ def render_review_stage(slug, profile, history):
                 if excluded_count:
                     st.caption(f"{excluded_count} comp{'s' if excluded_count != 1 else ''} excluded from the numbers below.")
 
+                st.caption("Include in printed report, based on the comps above:")
+                comp_table_cols = st.columns(3)
+                section_toggles["active_listings"] = comp_table_cols[0].checkbox(
+                    "Active Listings table", value=True, key="section_toggle_active_listings"
+                )
+                section_toggles["pending_listings"] = comp_table_cols[1].checkbox(
+                    "Pending Listings table", value=True, key="section_toggle_pending_listings"
+                )
+                section_toggles["closed_comps"] = comp_table_cols[2].checkbox(
+                    "Recently Closed Comps table", value=True, key="section_toggle_closed_comps"
+                )
+
+                section_toggles["market_comparison"] = st.checkbox(
+                    "Include stats & absorption charts below in printed report",
+                    value=True, key="section_toggle_market_comparison",
+                )
                 stats = compute_absorption(calc_comps)
                 computed["absorption_stats"] = stats
                 row_count = len(calc_comps)
@@ -1293,10 +1304,14 @@ def render_review_stage(slug, profile, history):
                     st.caption("Not enough comps with both a price and days-on-market to plot yet.")
 
                 viewed = also_viewed_comps(calc_comps)
+                saved = also_saved_comps(calc_comps)
+                if viewed or saved:
+                    section_toggles["viewer_overlap"] = st.checkbox(
+                        "Include viewer overlap tables below in printed report",
+                        value=True, key="section_toggle_viewer_overlap",
+                    )
                 if viewed:
                     render_viewer_overlap_table(viewed, "also_viewed_since", "People who viewed your listing also viewed")
-
-                saved = also_saved_comps(calc_comps)
                 if saved:
                     render_viewer_overlap_table(saved, "also_saved_since", "People who saved your listing also saved")
 
@@ -1304,6 +1319,10 @@ def render_review_stage(slug, profile, history):
                 band = match_price_band(merged.get("list_price"), merged["price_bands"])
                 computed["subject_price_band"] = band
 
+                section_toggles["price_bands"] = st.checkbox(
+                    "Include price band chart below in printed report",
+                    value=True, key="section_toggle_price_bands",
+                )
                 st.write("**Sample chart** — showings by price band *(prototype)*:")
                 band_chart = price_band_chart(merged["price_bands"], band)
                 if band_chart is not None:
