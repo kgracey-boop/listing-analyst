@@ -1095,7 +1095,7 @@ def render_review_stage(slug, profile, history):
                 "Comp price range",
                 min_value=slider_min, max_value=slider_max,
                 value=(default_low, default_high), step=5000.0,
-                key="comp_price_band", label_visibility="collapsed",
+                key=f"comp_price_band_{slug}", label_visibility="collapsed",
             )
             price_band = (band_low, band_high)
             in_band_count = len(filter_by_price_band(comps_with_price, price_band))
@@ -1117,7 +1117,7 @@ def render_review_stage(slug, profile, history):
 
     with st.expander("Price history & reductions", key="pdfsection-price-history"):
         section_toggles["price_history"] = st.checkbox(
-            "Include in printed report", value=True, key="section_toggle_price_history"
+            "Include in printed report", value=True, key=f"section_toggle_price_history_{slug}"
         )
         if merged.get("list_date") or merged.get("original_list_price"):
             date_part = f"Listed {merged['list_date']}" if merged.get("list_date") else "Listed"
@@ -1199,7 +1199,7 @@ def render_review_stage(slug, profile, history):
             "Showings (last 30 days)", value=int(merged["showings"].get("last_30_days") or 0), step=1
         )
         section_toggles["feedback"] = st.checkbox(
-            "Include buyer feedback in printed report", value=True, key="section_toggle_feedback"
+            "Include buyer feedback in printed report", value=True, key=f"section_toggle_feedback_{slug}"
         )
         st.write("Feedback — verbatim quotes, not summarized themes. Check Follow-up to flag a buyer worth watching; it persists across future visits.")
         feedback_rows = all_feedback_list(st.session_state["known_feedback"])
@@ -1228,7 +1228,7 @@ def render_review_stage(slug, profile, history):
 
     with st.expander("Online traffic", key="pdfsection-online-traffic"):
         section_toggles["online_traffic"] = st.checkbox(
-            "Include in printed report", value=True, key="section_toggle_online_traffic"
+            "Include in printed report", value=True, key=f"section_toggle_online_traffic_{slug}"
         )
         if merged["traffic_by_source"]:
             st.caption("Kept separate — different platforms count differently:")
@@ -1280,18 +1280,18 @@ def render_review_stage(slug, profile, history):
                 st.caption("Include in printed report, based on the comps above:")
                 comp_table_cols = st.columns(3)
                 section_toggles["active_listings"] = comp_table_cols[0].checkbox(
-                    "Active Listings table", value=True, key="section_toggle_active_listings"
+                    "Active Listings table", value=True, key=f"section_toggle_active_listings_{slug}"
                 )
                 section_toggles["pending_listings"] = comp_table_cols[1].checkbox(
-                    "Pending Listings table", value=True, key="section_toggle_pending_listings"
+                    "Pending Listings table", value=True, key=f"section_toggle_pending_listings_{slug}"
                 )
                 section_toggles["closed_comps"] = comp_table_cols[2].checkbox(
-                    "Recently Closed Comps table", value=True, key="section_toggle_closed_comps"
+                    "Recently Closed Comps table", value=True, key=f"section_toggle_closed_comps_{slug}"
                 )
 
                 section_toggles["market_comparison"] = st.checkbox(
                     "Include core stats below (totals, months of supply, price/sqft, DOM, data scope) in printed report",
-                    value=True, key="section_toggle_market_comparison",
+                    value=True, key=f"section_toggle_market_comparison_{slug}",
                 )
                 stats = compute_absorption(calc_comps)
                 computed["absorption_stats"] = stats
@@ -1313,14 +1313,14 @@ def render_review_stage(slug, profile, history):
                 computed["subject_property_type_bucket"] = subject_bucket
                 section_toggles["property_type_breakdown"] = st.checkbox(
                     "Include property type & subdivision charts below in printed report",
-                    value=True, key="section_toggle_property_type_breakdown",
+                    value=True, key=f"section_toggle_property_type_breakdown_{slug}",
                 )
                 render_property_type_breakdown(calc_comps, subject_bucket)
                 render_zip_vs_subdivision_comparison(calc_comps, profile.get("subdivision"), profile.get("property_type"))
 
                 section_toggles["weekly_contracts"] = st.checkbox(
                     "Include weekly contracts chart below in printed report",
-                    value=True, key="section_toggle_weekly_contracts",
+                    value=True, key=f"section_toggle_weekly_contracts_{slug}",
                 )
                 render_weekly_contracts_chart(calc_comps, profile.get("property_type"))
 
@@ -1356,7 +1356,7 @@ def render_review_stage(slug, profile, history):
 
                 section_toggles["price_position"] = st.checkbox(
                     "Include price position chart below in printed report",
-                    value=True, key="section_toggle_price_position",
+                    value=True, key=f"section_toggle_price_position_{slug}",
                 )
                 st.write("**Sample chart** — price vs. days on market for active/pending/closed comps *(prototype)*:")
                 scope_col, recency_col = st.columns(2)
@@ -1364,13 +1364,13 @@ def render_review_stage(slug, profile, history):
                     scope_label = st.selectbox(
                         "Comps shown in chart", list(COMPS_SCOPE_OPTIONS.keys()),
                         index=list(COMPS_SCOPE_OPTIONS.keys()).index(DEFAULT_COMPS_SCOPE),
-                        key="comps_scope_label",
+                        key=f"comps_scope_label_{slug}",
                     )
                 with recency_col:
                     solds_window_label = st.selectbox(
                         "Solds shown in chart", list(SOLDS_WINDOW_OPTIONS.keys()),
                         index=list(SOLDS_WINDOW_OPTIONS.keys()).index(DEFAULT_SOLDS_WINDOW),
-                        key="solds_window_label",
+                        key=f"solds_window_label_{slug}",
                     )
                 scoped_comps = calc_comps
                 if COMPS_SCOPE_OPTIONS[scope_label] == "subdivision":
@@ -1394,7 +1394,7 @@ def render_review_stage(slug, profile, history):
                 if viewed or saved:
                     section_toggles["viewer_overlap"] = st.checkbox(
                         "Include viewer overlap tables below in printed report",
-                        value=True, key="section_toggle_viewer_overlap",
+                        value=True, key=f"section_toggle_viewer_overlap_{slug}",
                     )
                 if viewed:
                     render_viewer_overlap_table(viewed, "also_viewed_since", "People who viewed your listing also viewed")
@@ -1407,7 +1407,7 @@ def render_review_stage(slug, profile, history):
 
                 section_toggles["price_bands"] = st.checkbox(
                     "Include price band chart below in printed report",
-                    value=True, key="section_toggle_price_bands",
+                    value=True, key=f"section_toggle_price_bands_{slug}",
                 )
                 st.write("**Sample chart** — showings by price band *(prototype)*:")
                 band_chart = price_band_chart(merged["price_bands"], band)
@@ -1451,15 +1451,17 @@ def render_review_stage(slug, profile, history):
             "reorder independently, so a section can't be dragged from one group into the other."
         )
         st.write("Your Listing:")
-        subject_labels = st.session_state.get("subject_section_order") or list(SUBJECT_SECTION_LABELS.values())
-        st.session_state["subject_section_order"] = sort_items(
-            subject_labels, direction="vertical", key="subject_section_sortable"
+        subject_order_key = f"subject_section_order_{slug}"
+        subject_labels = st.session_state.get(subject_order_key) or list(SUBJECT_SECTION_LABELS.values())
+        st.session_state[subject_order_key] = sort_items(
+            subject_labels, direction="vertical", key=f"subject_section_sortable_{slug}"
         )
 
         st.write("The Market:")
-        market_labels = st.session_state.get("market_section_order") or list(MARKET_SECTION_LABELS.values())
-        st.session_state["market_section_order"] = sort_items(
-            market_labels, direction="vertical", key="market_section_sortable"
+        market_order_key = f"market_section_order_{slug}"
+        market_labels = st.session_state.get(market_order_key) or list(MARKET_SECTION_LABELS.values())
+        st.session_state[market_order_key] = sort_items(
+            market_labels, direction="vertical", key=f"market_section_sortable_{slug}"
         )
 
     st.subheader("Save & export")
@@ -1467,20 +1469,20 @@ def render_review_stage(slug, profile, history):
                "Each section above has its own \"Include in printed report\" checkbox.")
 
     pdf_subject_order = [
-        SUBJECT_LABEL_TO_KEY[label] for label in st.session_state.get("subject_section_order", [])
+        SUBJECT_LABEL_TO_KEY[label] for label in st.session_state.get(f"subject_section_order_{slug}", [])
         if label in SUBJECT_LABEL_TO_KEY
     ]
     pdf_market_order = [
-        MARKET_LABEL_TO_KEY[label] for label in st.session_state.get("market_section_order", [])
+        MARKET_LABEL_TO_KEY[label] for label in st.session_state.get(f"market_section_order_{slug}", [])
         if label in MARKET_LABEL_TO_KEY
     ]
     pdf_calc_comps = (
         filter_by_price_band(active_for_calculation(st.session_state["known_comps"]), price_band)
         if st.session_state["known_comps"] else None
     )
-    pdf_solds_window_label = st.session_state.get("solds_window_label", DEFAULT_SOLDS_WINDOW)
+    pdf_solds_window_label = st.session_state.get(f"solds_window_label_{slug}", DEFAULT_SOLDS_WINDOW)
     pdf_solds_window_months = SOLDS_WINDOW_OPTIONS.get(pdf_solds_window_label, SOLDS_WINDOW_OPTIONS[DEFAULT_SOLDS_WINDOW])
-    pdf_scope_label = st.session_state.get("comps_scope_label", DEFAULT_COMPS_SCOPE)
+    pdf_scope_label = st.session_state.get(f"comps_scope_label_{slug}", DEFAULT_COMPS_SCOPE)
     pdf_comps_scope = COMPS_SCOPE_OPTIONS.get(pdf_scope_label, COMPS_SCOPE_OPTIONS[DEFAULT_COMPS_SCOPE])
     pdf_feedback = all_feedback_list(st.session_state["known_feedback"]) if st.session_state["known_feedback"] else None
     st.download_button(
