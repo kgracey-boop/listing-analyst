@@ -1447,11 +1447,15 @@ def render_review_stage(slug, profile, history):
         )
         st.write("Your Listing:")
         subject_labels = st.session_state.get("subject_section_order") or list(SUBJECT_SECTION_LABELS.values())
-        st.session_state["subject_section_order"] = sort_items(subject_labels, key="subject_section_sortable")
+        st.session_state["subject_section_order"] = sort_items(
+            subject_labels, direction="vertical", key="subject_section_sortable"
+        )
 
         st.write("The Market:")
         market_labels = st.session_state.get("market_section_order") or list(MARKET_SECTION_LABELS.values())
-        st.session_state["market_section_order"] = sort_items(market_labels, key="market_section_sortable")
+        st.session_state["market_section_order"] = sort_items(
+            market_labels, direction="vertical", key="market_section_sortable"
+        )
 
     st.subheader("Save & export")
     st.caption("Saved — the next report for this property will compare against this one. "
