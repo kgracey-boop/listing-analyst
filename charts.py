@@ -232,30 +232,33 @@ def absorption_chart(bucket_stats: list):
 def weekly_contracts_chart(weekly_counts: list):
     """Bar chart: count of comps (already filtered to the subject's own
     property type) that went under contract each week, over roughly the
-    last 2 years. Tooltip-only, no direct labels — with up to ~104 bars,
-    labeling every one would be unreadable clutter rather than a helpful
-    figure. Returns None if there's nothing to plot."""
+    last 2 years. Plotted as a right-justified relative timeline (weeks
+    back from now, most recent on the right) rather than calendar dates --
+    a continuous date axis crammed with ~104 weekly bars couldn't
+    guarantee visible gaps between bars at that density, so adjacent
+    weeks visually fused together. An ordinal "weeks back" axis gives
+    every bar an even, guaranteed band width instead, regardless of how
+    many weeks are plotted. Tooltip-only, no direct labels — with up to
+    ~104 bars, labeling every one would be unreadable clutter rather than
+    a helpful figure. Returns None if there's nothing to plot."""
     if not weekly_counts:
         return None
 
     df = pd.DataFrame(weekly_counts)
-
-    # A fixed 600px width left under 6px per bar at the full ~104-week
-    # window -- too tight for Vega-Lite to keep visible gaps between bars,
-    # so adjacent weeks visually fused together. Scaling width with the
-    # number of bars guarantees a minimum ~8px each regardless of window
-    # size, while not needlessly widening a chart with only a few weeks
-    # of data.
     width = max(600, len(df) * 8)
 
     return (
         alt.Chart(df)
         .mark_bar(color="#2a78d6")
         .encode(
-            x=alt.X("week_start:T", title="Week"),
+            x=alt.X(
+                "weeks_back:O", title="Weeks back", sort="descending",
+                axis=alt.Axis(labelOverlap=True),
+            ),
             y=alt.Y("count:Q", title="Contracts that week"),
             tooltip=[
                 alt.Tooltip("week_start:T", title="Week of"),
+                alt.Tooltip("weeks_back:O", title="Weeks back"),
                 alt.Tooltip("count:Q", title="Contracts"),
             ],
         )

@@ -235,6 +235,13 @@ def weekly_contracts(comparable_listings: list, subject_property_type: str, week
     hide exactly the signal this is meant to show. Weeks with zero
     contracts are included as zero, not skipped, so a real dead spot in the
     market doesn't silently compress out of the timeline.
+
+    Each entry also carries weeks_back (1 = the most recent completed
+    week, increasing going back in time) alongside the real week_start
+    date. The chart plots against weeks_back, not the calendar date --
+    a right-justified relative timeline reads far more cleanly than
+    ~104 weekly dates squeezed across a 2-year span. week_start is still
+    here for the tooltip.
     """
     as_of = as_of or datetime.today()
     bucket = bucket_property_type(subject_property_type)
@@ -261,7 +268,9 @@ def weekly_contracts(comparable_listings: list, subject_property_type: str, week
         if key in counts:
             counts[key] += 1
 
-    return [{"week_start": k, "count": v} for k, v in sorted(counts.items())]
+    rows = sorted(counts.items())  # oldest first
+    total = len(rows)
+    return [{"week_start": k, "count": v, "weeks_back": total - i} for i, (k, v) in enumerate(rows)]
 
 
 def compute_new_construction_absorption(comparable_listings: list, as_of=None) -> dict:
