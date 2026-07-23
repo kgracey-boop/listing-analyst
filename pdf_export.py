@@ -637,7 +637,7 @@ def build_pdf(
                     f"{orig} → {sold}",
                     c.get("days_on_market") if c.get("days_on_market") is not None else "-",
                     _fmt_money(psf) or "-",
-                    _fmt_money(c.get("concessions_amount")) or "-",
+                    _fmt_money(c.get("concessions_amount")) or "(no info)",
                 ])
             body = _table(["Address", "Original → Sold", "DOM", "$/sqft", "Concessions"], rows)
             if len(closed_comps) > MAX_COMP_ROWS:
