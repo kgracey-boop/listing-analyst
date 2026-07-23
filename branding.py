@@ -174,6 +174,28 @@ def inject_css():
             color: {BRAND['navy']} !important;
             text-decoration: underline;
         }}
+
+        /* Review-stage report sections — echoes the printed PDF's own
+        section styling (Belleza headers in navy, gold top accent) so the
+        agent can gauge how a section will read before deciding, via its
+        own checkbox, whether to include it. Scoped to keys prefixed
+        "pdfsection-" so utility panels (debug, per-file extraction peek)
+        keep their plain, clearly-not-report-content look. */
+        [class*="st-key-pdfsection-"] [data-testid="stExpander"],
+        [class*="st-key-pdfsection-"][data-testid="stExpander"] {{
+            border: none !important;
+            border-top: 3px solid {BRAND['gold']} !important;
+            border-radius: 0 !important;
+        }}
+        [class*="st-key-pdfsection-"] summary,
+        [class*="st-key-pdfsection-"] summary p,
+        [class*="st-key-pdfsection-"] summary span {{
+            font-family: 'Belleza', sans-serif !important;
+            color: {BRAND['navy']} !important;
+            font-size: 1.1rem !important;
+            letter-spacing: 0.5px !important;
+            text-transform: none !important;
+        }}
         </style>
         """,
         unsafe_allow_html=True,

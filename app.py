@@ -323,18 +323,6 @@ DEFAULT_SOLDS_WINDOW = "Last 3 months"
 COMPS_SCOPE_OPTIONS = {"All": "all", "Subdivision only": "subdivision"}
 DEFAULT_COMPS_SCOPE = "All"
 
-# Key Numbers always shows — it's the core snapshot, not worth making optional.
-PDF_SECTION_TOGGLES = [
-    ("price_history", "Price history & reductions"),
-    ("market_comparison", "Market comparison (absorption, price/sqft, DOM)"),
-    ("active_listings", "Active listings you're competing with"),
-    ("closed_comps", "Recently closed comps"),
-    ("viewer_overlap", "Viewer overlap (\"also viewed\" / \"also saved\")"),
-    ("price_bands", "Showings by price band"),
-    ("feedback", "Buyer feedback"),
-    ("online_traffic", "Online traffic"),
-]
-
 
 def comps_by_status(comparable_listings: list) -> dict:
     """Splits comps into Active / Pending / Closed / Failed (expired or
@@ -1030,6 +1018,7 @@ def render_review_stage(slug, profile, history):
         st.info(f"No new reports uploaded this visit — showing your last saved report ({history[-1]['date']}).")
     merged = merged_with_resolutions(history)
     computed = {}
+    section_toggles = {}
 
     if st.session_state["known_comps"] is None:
         st.session_state["known_comps"] = storage.load_known_comps(slug)
@@ -1045,7 +1034,8 @@ def render_review_stage(slug, profile, history):
             st.session_state["known_feedback"], merged["feedback"]
         )
 
-    with st.expander("Basic facts", expanded=True):
+    with st.expander("Basic facts", expanded=True, key="pdfsection-basic-facts"):
+        st.caption("Always included in the printed report as Key Numbers.")
         merged["list_price"] = st.number_input("List price", value=float(merged.get("list_price") or 0), step=1000.0)
         merged["original_list_price"] = st.number_input(
             "Original list price", value=float(merged.get("original_list_price") or 0), step=1000.0
@@ -1058,7 +1048,10 @@ def render_review_stage(slug, profile, history):
             "Square feet", value=int(merged.get("square_feet") or 0), step=50
         )
 
-    with st.expander("Price history & reductions"):
+    with st.expander("Price history & reductions", key="pdfsection-price-history"):
+        section_toggles["price_history"] = st.checkbox(
+            "Include in printed report", value=True, key="section_toggle_price_history"
+        )
         if merged.get("list_date") or merged.get("original_list_price"):
             date_part = f"Listed {merged['list_date']}" if merged.get("list_date") else "Listed"
             price_part = f" at {money(merged['original_list_price'])}" if merged.get("original_list_price") else ""
@@ -1129,12 +1122,16 @@ def render_review_stage(slug, profile, history):
                     f"{MIN_MONTHS_WITH_DATA})."
                 )
 
-    with st.expander("Showings & Feedback on Subject"):
+    with st.expander("Showings & Feedback on Subject", key="pdfsection-feedback"):
+        st.caption("Showings counts always show in the printed report's Key Numbers.")
         merged["showings"]["total"] = st.number_input(
             "Showings (total)", value=int(merged["showings"].get("total") or 0), step=1
         )
         merged["showings"]["last_30_days"] = st.number_input(
             "Showings (last 30 days)", value=int(merged["showings"].get("last_30_days") or 0), step=1
+        )
+        section_toggles["feedback"] = st.checkbox(
+            "Include buyer feedback in printed report", value=True, key="section_toggle_feedback"
         )
         st.write("Feedback — verbatim quotes, not summarized themes. Check Follow-up to flag a buyer worth watching; it persists across future visits.")
         feedback_rows = all_feedback_list(st.session_state["known_feedback"])
@@ -1161,7 +1158,10 @@ def render_review_stage(slug, profile, history):
             st.session_state["known_feedback"], edited_feedback_rows
         )
 
-    with st.expander("Online traffic"):
+    with st.expander("Online traffic", key="pdfsection-online-traffic"):
+        section_toggles["online_traffic"] = st.checkbox(
+            "Include in printed report", value=True, key="section_toggle_online_traffic"
+        )
         if merged["traffic_by_source"]:
             st.caption("Kept separate — different platforms count differently:")
             for entry in merged["traffic_by_source"]:
@@ -1169,7 +1169,8 @@ def render_review_stage(slug, profile, history):
         else:
             st.caption("No online traffic data found in the uploaded reports.")
 
-    with st.expander("Momentum"):
+    with st.expander("Momentum", key="pdfsection-momentum"):
+        st.caption("Review-only — momentum doesn't currently appear in the printed report.")
         current_views = total_views(merged)
         computed["total_views"] = current_views
         if not history:
@@ -1192,7 +1193,12 @@ def render_review_stage(slug, profile, history):
 
     known_comps = st.session_state["known_comps"]
     if known_comps or merged["price_bands"]:
-        with st.expander("Market comparison"):
+        with st.expander("Market comparison", key="pdfsection-market-comparison"):
+            section_toggles["market_comparison"] = st.checkbox(
+                "Include market comparison in printed report "
+                "(comps, absorption, active/closed listings, viewer overlap, price bands)",
+                value=True, key="section_toggle_market_comparison",
+            )
             if known_comps:
                 st.write("Comparable listings — check Exclude on any comp that isn't a fair comparison (e.g. a unique property) to leave it out of the numbers below:")
                 known_comps = render_comps_editor(known_comps)
@@ -1304,7 +1310,8 @@ def render_review_stage(slug, profile, history):
                     st.altair_chart(band_chart, use_container_width=True)
 
     if merged["_conflicts"] or merged["notes_on_missing_or_unclear_data"]:
-        with st.expander("Data quality notes"):
+        with st.expander("Data quality notes", key="pdfsection-data-quality-notes"):
+            st.caption("Review-only — these notes don't appear in the printed report.")
             if merged["_conflicts"]:
                 st.caption("Skipped on the Resolve conflicts step — pick the right value in Basic facts above:")
                 for field, values in merged["_conflicts"].items():
@@ -1334,14 +1341,8 @@ def render_review_stage(slug, profile, history):
     render_debug_panel(merged, profile, st.session_state["known_comps"], st.session_state["known_feedback"], computed)
 
     st.subheader("Save & export")
-    st.caption("Saved — the next report for this property will compare against this one.")
-
-    with st.expander("Choose report sections"):
-        st.caption("Uncheck anything you don't want in this property's PDF — Key Numbers always shows.")
-        section_toggles = {
-            key: st.checkbox(label, value=True, key=f"section_toggle_{key}")
-            for key, label in PDF_SECTION_TOGGLES
-        }
+    st.caption("Saved — the next report for this property will compare against this one. "
+               "Each section above has its own \"Include in printed report\" checkbox.")
 
     pdf_calc_comps = active_for_calculation(st.session_state["known_comps"]) if st.session_state["known_comps"] else None
     pdf_solds_window_label = st.session_state.get("solds_window_label", DEFAULT_SOLDS_WINDOW)

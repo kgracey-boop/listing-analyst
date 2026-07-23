@@ -560,7 +560,7 @@ def build_pdf(
         active_comps = [c for c in calc_comps if c.get("status") == "active" and c.get("list_price")]
         subject_price = merged.get("list_price")
         active_comps.sort(key=lambda c: abs(c["list_price"] - subject_price) if subject_price else 0)
-        if active_comps and _section_enabled(section_toggles, "active_listings"):
+        if active_comps and _section_enabled(section_toggles, "market_comparison"):
             rows = []
             for c in active_comps[:MAX_COMP_ROWS]:
                 psf = price_per_sqft(c.get("list_price"), c.get("square_feet"))
@@ -582,7 +582,7 @@ def build_pdf(
         # ------------------------------------------------------ Closed comps
         closed_comps = [c for c in calc_comps if c.get("status") == "closed" and c.get("sold_price")]
         closed_comps.sort(key=lambda c: try_parse_date(c.get("close_date")) or try_parse_date("1900-01-01"), reverse=True)
-        if closed_comps and _section_enabled(section_toggles, "closed_comps"):
+        if closed_comps and _section_enabled(section_toggles, "market_comparison"):
             rows = []
             for c in closed_comps[:MAX_COMP_ROWS]:
                 psf = price_per_sqft(c.get("sold_price"), c.get("square_feet"))
@@ -600,12 +600,12 @@ def build_pdf(
             sections.append(_section("Recently Closed Comps", body))
 
         # -------------------------------------------------- Viewer overlap
-        if _section_enabled(section_toggles, "viewer_overlap"):
+        if _section_enabled(section_toggles, "market_comparison"):
             sections.append(_viewer_overlap_section(also_viewed_comps(calc_comps), "also_viewed_since", "People Who Viewed Your Listing Also Viewed"))
             sections.append(_viewer_overlap_section(also_saved_comps(calc_comps), "also_saved_since", "People Who Saved Your Listing Also Saved"))
 
     # ------------------------------------------------------------ Price bands
-    if merged.get("price_bands") and _section_enabled(section_toggles, "price_bands"):
+    if merged.get("price_bands") and _section_enabled(section_toggles, "market_comparison"):
         band = match_price_band(merged.get("list_price"), merged["price_bands"])
         sections.append(_section("Showings by Price Band", _chart_svg(price_band_chart(merged["price_bands"], band))))
 
