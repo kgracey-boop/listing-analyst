@@ -290,6 +290,27 @@ h2 {{
     page-break-inside: avoid;
 }}
 
+.group-label {{
+    font-family: 'Work Sans', sans-serif;
+    font-size: 9.5pt;
+    font-weight: 700;
+    color: {navy};
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin: 0 0 3mm 0;
+}}
+.group-label-market {{
+    margin-top: 2mm;
+}}
+.group-mist {{
+    background: {mist};
+    padding: 5mm 6mm 1mm 6mm;
+    margin-bottom: 4mm;
+}}
+.group-mist .section:last-child {{
+    margin-bottom: 0;
+}}
+
 .stat-grid {{
     display: flex;
     flex-wrap: wrap;
@@ -377,7 +398,13 @@ def build_pdf(
         footer_text=_css_str_esc(footer_text),
     )
 
-    sections = []
+    # Two visual groups instead of one flat flow: "Your Listing" (this
+    # property's own facts/performance) gets a light gray card up top,
+    # "The Market" (comps/area context) stays plain white below it -- reads
+    # as your story first, market evidence second, instead of one long
+    # undifferentiated scroll.
+    subject_sections = []
+    market_sections = []
 
     # ---------------------------------------------------------- Key Numbers
     stats_lines = [
@@ -394,7 +421,7 @@ def build_pdf(
         for label, value in stats_lines if value
     )
     key_numbers_body = f'<div class="stat-grid">{tiles}</div>' if tiles else '<p class="caption">No basic facts captured yet for this property.</p>'
-    sections.append(_section("Key Numbers", key_numbers_body))
+    subject_sections.append(_section("Key Numbers", key_numbers_body))
 
     # ------------------------------------------------- Price history section
     if _section_enabled(section_toggles, "price_history") and (
@@ -448,7 +475,7 @@ def build_pdf(
                     f'(usable data for {trend["months_with_data"]} of the last 12 months, need at least {MIN_MONTHS_WITH_DATA}).</p>'
                 )
 
-        sections.append(_section("Price History", "".join(parts), page_break_before=True))
+        subject_sections.append(_section("Price History", "".join(parts), page_break_before=True))
 
     # ------------------------------------------------- Market comparison
     if calc_comps:
@@ -508,7 +535,7 @@ def build_pdf(
             parts.append(f'<p class="caption">Data scope: {_esc(" · ".join(scope_parts))}</p>')
 
         if _section_enabled(section_toggles, "market_comparison"):
-            sections.append(_section("Market Comparison", "".join(parts)))
+            market_sections.append(_section("Market Comparison", "".join(parts)))
 
         # ------------------------------------- By property type & subdivision
         by_type = absorption_by_property_type(calc_comps)
@@ -569,7 +596,7 @@ def build_pdf(
                 breakdown_parts.append(f'<p class="caption">Not enough sold data yet to calculate a rate for: {_esc(", ".join(skipped))}.</p>')
 
         if _section_enabled(section_toggles, "property_type_breakdown"):
-            sections.append(_section("By Property Type & Subdivision", "".join(breakdown_parts)))
+            market_sections.append(_section("By Property Type & Subdivision", "".join(breakdown_parts)))
 
         # ------------------------------------------------------ Weekly contracts
         if profile.get("property_type") and _section_enabled(section_toggles, "weekly_contracts"):
@@ -578,7 +605,7 @@ def build_pdf(
                 bucket_label = bucket_property_type(profile["property_type"])
                 weekly_body = f'<p class="body-line">Weekly contracts — {_esc(bucket_label)} (last ~2 years):</p>'
                 weekly_body += _chart_svg(weekly_contracts_chart(weekly))
-                sections.append(_section("Weekly Contracts", weekly_body))
+                market_sections.append(_section("Weekly Contracts", weekly_body))
 
         # ------------------------------------------------------- Price position
         if _section_enabled(section_toggles, "price_position"):
@@ -590,7 +617,7 @@ def build_pdf(
                 chart_comps, merged.get("list_price"), merged.get("days_on_market"),
                 market_rate_price, closed_median_dom,
             ))
-            sections.append(_section("Price Position", position_body))
+            market_sections.append(_section("Price Position", position_body))
 
         # ---------------------------------------- Active listings (with links)
         active_comps = [c for c in calc_comps if c.get("status") == "active" and c.get("list_price")]
@@ -613,7 +640,7 @@ def build_pdf(
             body += _table(["Address", "List Price", "DOM", "$/sqft", "Link"], rows, link_col=4)
             if len(active_comps) > MAX_COMP_ROWS:
                 body += f'<p class="caption">Showing the {MAX_COMP_ROWS} closest in price to yours, of {len(active_comps)} active comps total.</p>'
-            sections.append(_section("Active Listings You're Competing With", body, keep_together=True))
+            market_sections.append(_section("Active Listings You're Competing With", body, keep_together=True))
 
         # --------------------------------------- Pending listings (with links)
         # Sorted by expected closing date, soonest first — not price
@@ -644,7 +671,7 @@ def build_pdf(
             )
             if len(pending_comps) > MAX_COMP_ROWS:
                 body += f'<p class="caption">Showing the {MAX_COMP_ROWS} soonest to close, of {len(pending_comps)} pending comps total.</p>'
-            sections.append(_section("Pending Listings About to Close", body, keep_together=True))
+            market_sections.append(_section("Pending Listings About to Close", body, keep_together=True))
 
         # ------------------------------------------------------ Closed comps
         closed_comps = [c for c in calc_comps if c.get("status") == "closed" and c.get("sold_price")]
@@ -676,23 +703,23 @@ def build_pdf(
                 for c in commented:
                     address = c.get("address") or "Unknown address"
                     body += f'<p class="caption">- {_esc(address)}: {_esc(c["concessions_comments"])}</p>'
-            sections.append(_section("Recently Closed Comps", body, keep_together=True))
+            market_sections.append(_section("Recently Closed Comps", body, keep_together=True))
 
         # -------------------------------------------------- Viewer overlap
         if _section_enabled(section_toggles, "viewer_overlap"):
-            sections.append(_viewer_overlap_section(also_viewed_comps(calc_comps), "also_viewed_since", "People Who Viewed Your Listing Also Viewed"))
-            sections.append(_viewer_overlap_section(also_saved_comps(calc_comps), "also_saved_since", "People Who Saved Your Listing Also Saved"))
+            market_sections.append(_viewer_overlap_section(also_viewed_comps(calc_comps), "also_viewed_since", "People Who Viewed Your Listing Also Viewed"))
+            market_sections.append(_viewer_overlap_section(also_saved_comps(calc_comps), "also_saved_since", "People Who Saved Your Listing Also Saved"))
 
     # ------------------------------------------------------------ Price bands
     if merged.get("price_bands") and _section_enabled(section_toggles, "price_bands"):
         band = match_price_band(merged.get("list_price"), merged["price_bands"])
-        sections.append(_section("Showings by Price Band", _chart_svg(price_band_chart(merged["price_bands"], band))))
+        subject_sections.append(_section("Showings by Price Band", _chart_svg(price_band_chart(merged["price_bands"], band))))
 
     # ------------------------------------------------------------- Feedback
     feedback_entries = known_feedback if known_feedback is not None else (merged.get("feedback") or [])
     if feedback_entries and _section_enabled(section_toggles, "feedback"):
         rows = [[f.get("date") or "Date unknown", f.get("quote") or ""] for f in feedback_entries]
-        sections.append(_section("Buyer Feedback", _table(["Date", "Feedback"], rows)))
+        subject_sections.append(_section("Buyer Feedback", _table(["Date", "Feedback"], rows)))
 
     # ---------------------------------------------------------- Online traffic
     if merged.get("traffic_by_source") and _section_enabled(section_toggles, "online_traffic"):
@@ -700,18 +727,24 @@ def build_pdf(
             f'<p class="body-line">{_esc(entry["source"])}: {entry["views"] or 0} views, {entry["saves"] or 0} saves</p>'
             for entry in merged["traffic_by_source"]
         )
-        sections.append(_section("Online Traffic", lines))
+        subject_sections.append(_section("Online Traffic", lines))
 
     # ------------------------------------------------------- Agent commentary
     if commentary:
-        sections.append(_section("Agent Commentary", f'<p class="body-line">{_esc(commentary)}</p>'))
+        subject_sections.append(_section("Agent Commentary", f'<p class="body-line">{_esc(commentary)}</p>'))
 
     subtitle_line = f"{_esc(brokerage)} · prepared by {_esc(prepared_by)}" if brokerage else f"Prepared by {_esc(prepared_by)}"
     contact_html = f'<p class="hero-contact">{_esc(contact)}</p>' if contact else ""
 
     logo_html = f'<img class="hero-logo" src="data:image/png;base64,{LOGO_HEADER_B64}" alt="Rooted Reports">' if LOGO_HEADER_B64 else ""
 
-    body_html = "".join(sections)
+    subject_html = "".join(subject_sections)
+    market_html = "".join(market_sections)
+    body_html = ""
+    if subject_html:
+        body_html += f'<div class="group-mist"><p class="group-label">Your Listing</p>{subject_html}</div>'
+    if market_html:
+        body_html += f'<p class="group-label group-label-market">The Market</p>{market_html}'
     full_html = f"""<!doctype html>
 <html>
 <head><meta charset="utf-8"><style>{css}</style></head>
