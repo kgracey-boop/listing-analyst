@@ -947,6 +947,10 @@ def render_reports_stage():
                 st.session_state["sources"].append({"source": f.name, "data": data})
                 with results_area:
                     st.success(summarize_extraction(f.name, data))
+                    with st.expander(f"🔍 Double-check what we pulled from {f.name}"):
+                        st.caption("Every field this file contributed — a quick way to catch a misread number before it reaches Review.")
+                        rows = _flatten_for_debug(data, "")
+                        st.dataframe(pd.DataFrame(rows, columns=["Field", "Value"]), width="stretch", hide_index=True)
             except Exception as e:
                 print(f"[extraction error] {f.name}: {e}")  # kept out of the user-facing UI on purpose
                 st.session_state["quiet_errors"].append(f.name)
