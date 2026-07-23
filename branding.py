@@ -189,9 +189,11 @@ def inject_css():
             border-top: 3px solid {BRAND['gold']} !important;
             border-radius: 0 !important;
         }}
-        [class*="st-key-pdfsection-"] summary,
-        [class*="st-key-pdfsection-"] summary p,
-        [class*="st-key-pdfsection-"] summary span {{
+        /* Targets only the markdown-rendered label text, not the
+        expand/collapse arrow icon that also lives inside <summary> —
+        that icon relies on an icon font, and styling it like text
+        broke its rendering into overlapping garbled characters. */
+        [class*="st-key-pdfsection-"] summary [data-testid="stMarkdownContainer"] p {{
             font-family: 'Belleza', sans-serif !important;
             color: {BRAND['navy']} !important;
             font-size: 1.1rem !important;
