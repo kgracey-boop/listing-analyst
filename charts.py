@@ -240,6 +240,14 @@ def weekly_contracts_chart(weekly_counts: list):
 
     df = pd.DataFrame(weekly_counts)
 
+    # A fixed 600px width left under 6px per bar at the full ~104-week
+    # window -- too tight for Vega-Lite to keep visible gaps between bars,
+    # so adjacent weeks visually fused together. Scaling width with the
+    # number of bars guarantees a minimum ~8px each regardless of window
+    # size, while not needlessly widening a chart with only a few weeks
+    # of data.
+    width = max(600, len(df) * 8)
+
     return (
         alt.Chart(df)
         .mark_bar(color="#2a78d6")
@@ -251,7 +259,7 @@ def weekly_contracts_chart(weekly_counts: list):
                 alt.Tooltip("count:Q", title="Contracts"),
             ],
         )
-        .properties(width=600, height=280)
+        .properties(width=width, height=280)
     )
 
 
